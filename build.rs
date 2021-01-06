@@ -2,6 +2,7 @@ use anyhow::*;
 use glob::glob;
 use std::fs::{read_to_string, write};
 use std::path::PathBuf;
+use rayon::prelude::*;
 
 use std::env;
 use fs_extra::{copy_items, dir::CopyOptions};
@@ -42,16 +43,14 @@ impl ShaderData {
 
 fn main() -> Result<()> {
     // Collect all shaders recursively within /src/
-    let mut shader_paths = [
-        glob("./src/**/*.vert")?,
-        glob("./src/**/*.frag")?,
-        glob("./src/**/*.comp")?,
-    ];
+    let mut shader_paths = Vec::new();
+    shader_paths.extend(glob("./src/**/*.vert")?);
+    shader_paths.extend(glob("./src/**/*.frag")?);
+    shader_paths.extend(glob("./src/**/*.comp")?);
 
     // This could be parallelized
     let shaders = shader_paths
-        .iter_mut()
-        .flatten()
+        .into_par_iter()
         .map(|glob_result| ShaderData::load(glob_result?))
         .collect::<Vec<Result<_>>>()
         .into_iter()
