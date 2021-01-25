@@ -13,12 +13,15 @@ cgmath = "*"
 env_logger = "*"
 log = "*"
 #wgpu = { path = "../wgpu-rs" }
-#wgpu = { git = "https://github.com/gfx-rs/wgpu-rs", branch = "gecko" }
 wgpu = "*"
+#wgpu = { git = "https://github.com/gfx-rs/wgpu-rs", branch = "gecko" }
 futures = { version = "*", features = ["thread-pool"] }
 bytemuck = { version = "*", features = ["derive"] }
 anyhow = "*"
 tobj = "*"
+gltf = { version = "*", features = ["utils", "names"] }
+itertools = "*"
+
 
 [build-dependencies]
 anyhow = "*"

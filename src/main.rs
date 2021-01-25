@@ -403,13 +403,21 @@ impl State {
         });
 
         let res_dir = std::path::Path::new(env!("OUT_DIR")).join("res");
+        //let obj_model = model::Model::load(
+        //    &device,
+        //    &queue,
+        //    &texture_bind_group_layout,
+        //    res_dir.join("monkey.obj"),
+        //    model::ModelType::OBJ
+        //)
         let obj_model = model::Model::load(
             &device,
             &queue,
             &texture_bind_group_layout,
-            res_dir.join("monkey.obj"),
-        )
-        .unwrap();
+            res_dir.join("AliciaSolid.vrm"),
+            model::ModelType::GLTF
+        ).await.unwrap();
+
 
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &sc_desc, "depth_texture");
@@ -481,6 +489,7 @@ impl State {
         self.size = new_size;
         self.sc_desc.width = new_size.width;
         self.sc_desc.height = new_size.height;
+        self.camera.aspect = self.sc_desc.width as f32 / self.sc_desc.height as f32;
         self.depth_texture =
             texture::Texture::create_depth_texture(&self.device, &self.sc_desc, "depth_texture");
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);

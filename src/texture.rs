@@ -1,5 +1,6 @@
 use anyhow::*;
 use image::GenericImageView;
+use image::ImageFormat::{Jpeg, Png};
 
 use std::path::Path;
 
@@ -7,6 +8,8 @@ pub struct Texture {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
+    pub id: u32,
+    pub tex_coord: u32,
 }
 
 impl Texture {
@@ -75,6 +78,8 @@ impl Texture {
             texture,
             view,
             sampler,
+            id: 0,
+            tex_coord: 0,
         })
     }
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float; // 1.
@@ -121,6 +126,8 @@ impl Texture {
             texture,
             view,
             sampler,
+            id: 1000000,
+            tex_coord:0,
         }
     }
     pub fn load<P: AsRef<Path>>(
@@ -133,5 +140,98 @@ impl Texture {
 
         let img = image::open(path)?;
         Self::from_image(device, queue, &img, label)
+    }
+    pub fn load_gltf(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture_info: &gltf::texture::Info,
+        buffers: &Vec<gltf::buffer::Data>,
+    ) -> Result<Self> {
+        let texture = texture_info.texture();
+        let id = texture.index() as u32;
+        let source = texture.source();
+        let sampler = texture.sampler();
+        let (img, label) = match source.source() {
+            gltf::image::Source::View{ view,  mime_type } => {
+                let buffer = &buffers[view.buffer().index()].0;
+                let data = &buffer[view.offset() .. view.offset()+view.length()];
+                let label = view.name();
+
+                let img = match mime_type {
+                    "image/jpeq" =>image::load_from_memory_with_format(data, Jpeg),
+                    "image/png" => image::load_from_memory_with_format(data, Png),
+                    _ => panic!("mimetype"),
+                };
+                (img, label)
+            },
+            _ => {
+                panic!()
+            }
+        };
+        let img = img.unwrap();
+
+        let rgba = img.to_rgba8();
+        let dimensions = img.dimensions();
+
+        let size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            depth: 1,
+        };
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+        });
+        queue.write_texture(
+            // Tells wgpu where to copy the pixel data
+            wgpu::TextureCopyView {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+            },
+            // The actual pixel data
+            &rgba,
+            // The layout of the texture
+            wgpu::TextureDataLayout {
+                offset: 0,
+                bytes_per_row: 4 * dimensions.0,
+                rows_per_image: dimensions.1,
+            },
+            size,
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mag_filter = match sampler.mag_filter().unwrap() {
+            gltf::texture::MagFilter::Linear => wgpu::FilterMode::Linear,
+            gltf::texture::MagFilter::Nearest => wgpu::FilterMode::Nearest,
+        };
+
+        let min_filter = match sampler.min_filter().unwrap() {
+            gltf::texture::MinFilter::Linear => wgpu::FilterMode::Linear,
+            gltf::texture::MinFilter::Nearest => wgpu::FilterMode::Nearest,
+            _ => wgpu::FilterMode::Nearest,
+        };
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter,
+            min_filter,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        Ok(Self {
+            texture,
+            view,
+            sampler,
+            id,
+            tex_coord: texture_info.tex_coord(),
+        })
     }
 }

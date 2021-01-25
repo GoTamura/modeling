@@ -3,6 +3,8 @@ use anyhow::*;
 use std::ops::Range;
 use std::path::Path;
 use wgpu::util::DeviceExt;
+use itertools::izip;
+
 
 pub trait Vertex {
     fn desc<'a>() -> wgpu::VertexBufferDescriptor<'a>;
@@ -48,8 +50,29 @@ pub struct Model {
     pub materials: Vec<Material>,
 }
 
+pub enum ModelType {
+    OBJ,
+    GLTF,
+}
+
 impl Model {
-    pub fn load<P: AsRef<Path>>(
+    pub async fn load<P: AsRef<Path>>(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        path: P,
+        model_type: ModelType,
+    ) -> Result<Self> {
+        match model_type {
+            ModelType::OBJ => {
+                Model::load_obj(device, queue, layout, path).await
+            },
+            ModelType::GLTF => {
+                Model::load_gltf(device, queue, layout, path).await
+            }
+        }
+    }
+    async fn load_obj<P: AsRef<Path>>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
@@ -61,6 +84,7 @@ impl Model {
         let containing_folder = path.as_ref().parent().context("Directory has no parent")?;
 
         let mut materials = Vec::new();
+        let mut i = 0;
         for mat in obj_materials {
             let diffuse_path = mat.diffuse_texture;
             let diffuse_texture =
@@ -89,7 +113,9 @@ impl Model {
                 name: mat.name,
                 diffuse_texture,
                 bind_group,
+                diffuse_texture_id: i,
             });
+            i += 1;
         }
 
         let mut meshes = Vec::new();
@@ -127,9 +153,107 @@ impl Model {
                 vertex_buffer,
                 index_buffer,
                 num_elements: m.mesh.indices.len() as u32,
-                material: m.mesh.material_id.unwrap_or(0),
+                material: m.mesh.material_id.unwrap_or(0) as u32,
             });
         }
+
+        Ok(Self { meshes, materials })
+    }
+
+    async fn load_gltf<P: AsRef<Path>>(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        path: P,
+    ) -> Result<Self> {
+
+        let (gltf, buffers, _) = gltf::import(path.as_ref())?;
+
+        let mut materials = Vec::new();
+        for material in gltf.materials() {
+            let base_color_info = material.pbr_metallic_roughness().base_color_texture().unwrap();
+
+            let diffuse_texture = texture::Texture::load_gltf(device, queue, &base_color_info, &buffers).unwrap();
+
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                    },
+                ],
+                label: None,
+            });
+
+            materials.push(Material {
+                name: material.name().unwrap().to_string(),
+                diffuse_texture,
+                bind_group,
+                diffuse_texture_id: material.pbr_metallic_roughness().base_color_texture().unwrap().texture().index() as u32,
+            });
+        }
+
+        let mut meshes = Vec::new();
+        for mesh in gltf.meshes() {
+            println!("Mesh #{}", mesh.index());
+            for primitive in mesh.primitives() {
+                println!("- Primitive #{}", primitive.index());
+                let mut vertices = Vec::new();
+                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+                if let Some(vertex_iter) = reader.read_positions() {
+                    if let Some(gltf::mesh::util::ReadTexCoords::F32(tex_coords_iter)) = reader.read_tex_coords(primitive.material().pbr_metallic_roughness().base_color_texture().unwrap().tex_coord()) {
+                        if let Some(normal_iter) = reader.read_normals() {
+                            let iter = izip!(vertex_iter, tex_coords_iter, normal_iter);
+                            for vertex in iter {
+                                vertices.push(ModelVertex {
+                                    position: [
+                                        vertex.0[0],
+                                        vertex.0[1],
+                                        vertex.0[2],
+                                    ],                                        
+                                    tex_coords: [vertex.1[0], vertex.1[1]],
+                                    normal: [
+                                        vertex.2[0],
+                                        vertex.2[1],
+                                        vertex.2[2],
+                                    ]
+                                })
+                            }
+                        }
+                    }
+                }
+                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("{:?} Vertex Buffer", path.as_ref())),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsage::VERTEX,
+                });
+                let indices = if let Some(gltf::mesh::util::ReadIndices::U32(indices_iter)) = reader.read_indices() {
+                    indices_iter.collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+
+                let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("{:?} Index Buffer", path.as_ref())),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsage::INDEX,
+                });
+
+                meshes.push(Mesh {
+                    name: mesh.name().unwrap().to_string(),
+                    vertex_buffer,
+                    index_buffer,
+                    num_elements: primitive.indices().unwrap().count() as u32,
+                    material: primitive.material().pbr_metallic_roughness().base_color_texture().unwrap().texture().index() as u32,
+                });
+            }
+        }
+
 
         Ok(Self { meshes, materials })
     }
@@ -138,6 +262,7 @@ impl Model {
 pub struct Material {
     pub name: String,
     pub diffuse_texture: texture::Texture,
+    pub diffuse_texture_id: u32,
     pub bind_group: wgpu::BindGroup,
 }
 
@@ -146,7 +271,7 @@ pub struct Mesh {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
-    pub material: usize,
+    pub material: u32,
 }
 
 pub trait DrawModel<'a, 'b>
@@ -228,7 +353,7 @@ where
         light: &'b wgpu::BindGroup,
     ) {
         for mesh in &model.meshes {
-            let material = &model.materials[mesh.material];
+            let material = &model.materials.iter().find(|material| material.diffuse_texture_id == mesh.material).unwrap();
             self.draw_mesh_instanced(mesh, material, instances.clone(), uniforms, light);
         }
     }

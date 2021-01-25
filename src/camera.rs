@@ -1,7 +1,4 @@
-use winit::{
-    event::*,
-};
-
+use winit::event::*;
 
 use cgmath::InnerSpace;
 
@@ -17,12 +14,9 @@ pub struct Camera {
 
 impl Camera {
     pub fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        // 1.
         let view = cgmath::Matrix4::look_at(self.eye, self.target, self.up);
-        // 2.
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
 
-        // 3.
         proj * view
     }
 }
@@ -63,11 +57,11 @@ impl CameraController {
             } => {
                 let is_pressed = *state == ElementState::Pressed;
                 match keycode {
-                    VirtualKeyCode::Space => {
+                    VirtualKeyCode::Q | VirtualKeyCode::Space => {
                         self.is_up_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::LShift => {
+                    VirtualKeyCode::R | VirtualKeyCode::LShift => {
                         self.is_down_pressed = is_pressed;
                         true
                     }
@@ -120,8 +114,17 @@ impl CameraController {
             // lies on the circle made by the target and eye.
             camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
         }
+
         if self.is_left_pressed {
             camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
+        }
+
+        if self.is_up_pressed {
+            camera.eye += camera.up * self.speed;
+        }
+
+        if self.is_down_pressed {
+            camera.eye -= camera.up * self.speed;
         }
     }
 }
