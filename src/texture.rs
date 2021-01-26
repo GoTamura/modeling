@@ -155,7 +155,7 @@ impl Texture {
             gltf::image::Source::View{ view,  mime_type } => {
                 let buffer = &buffers[view.buffer().index()].0;
                 let data = &buffer[view.offset() .. view.offset()+view.length()];
-                let label = view.name();
+                let label = view.name().map(|str| str.to_string());
 
                 let img = match mime_type {
                     "image/jpeq" =>image::load_from_memory_with_format(data, Jpeg),
@@ -164,8 +164,12 @@ impl Texture {
                 };
                 (img, label)
             },
-            _ => {
-                panic!()
+            gltf::image::Source::Uri{ ref uri, mime_type } => {
+                let uri_dir = std::path::Path::new(env!("OUT_DIR")).join("res").join(uri);
+                let label = uri_dir.to_str().map(|str| str.to_string());
+
+                let img = image::open(uri_dir);
+                (img, label)
             }
         };
         let img = img.unwrap();
@@ -179,7 +183,7 @@ impl Texture {
             depth: 1,
         };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label,
+            label: label.as_deref(),
             size,
             mip_level_count: 1,
             sample_count: 1,
