@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::path::Path;
 use wgpu::util::DeviceExt;
 use itertools::izip;
+use rayon::prelude::*;
 
 
 pub trait Vertex {
@@ -84,8 +85,7 @@ impl Model {
         let containing_folder = path.as_ref().parent().context("Directory has no parent")?;
 
         let mut materials = Vec::new();
-        let mut i = 0;
-        for mat in obj_materials {
+        for (i, mat) in obj_materials.into_iter().enumerate() {
             let diffuse_path = mat.diffuse_texture;
             let diffuse_texture =
                 texture::Texture::load(device, queue, containing_folder.join(diffuse_path))
@@ -113,9 +113,8 @@ impl Model {
                 name: mat.name,
                 diffuse_texture,
                 bind_group,
-                diffuse_texture_id: i,
+                diffuse_texture_id: i as u32,
             });
-            i += 1;
         }
 
         let mut meshes = Vec::new();
@@ -169,8 +168,8 @@ impl Model {
 
         let (gltf, buffers, _) = gltf::import(path.as_ref())?;
 
-        let mut materials = Vec::new();
-        for material in gltf.materials() {
+        //let materials = gltf.materials().map(|material| { 
+        let materials = gltf.materials().par_bridge().map(|material| { 
             let base_color_info = material.pbr_metallic_roughness().base_color_texture().unwrap();
 
             let diffuse_texture = texture::Texture::load_gltf(device, queue, &base_color_info, &buffers).unwrap();
@@ -190,45 +189,55 @@ impl Model {
                 label: None,
             });
 
-            materials.push(Material {
+            Material {
                 name: material.name().unwrap().to_string(),
                 diffuse_texture,
                 bind_group,
                 diffuse_texture_id: material.pbr_metallic_roughness().base_color_texture().unwrap().texture().index() as u32,
-            });
+            }
         }
+        ).collect();
 
-        let mut meshes = Vec::new();
-        for mesh in gltf.meshes() {
+        let label_path = path.as_ref().to_str().map(|str| str.to_string());
+
+        //let meshes = gltf.meshes().map(|mesh| {
+        let meshes = gltf.meshes().par_bridge().map(|mesh| {
             println!("Mesh #{}", mesh.index());
-            for primitive in mesh.primitives() {
+            //mesh.primitives().map(|primitive| {
+            mesh.primitives().par_bridge().map(|primitive| {
                 println!("- Primitive #{}", primitive.index());
-                let mut vertices = Vec::new();
                 let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-                if let Some(vertex_iter) = reader.read_positions() {
-                    if let Some(gltf::mesh::util::ReadTexCoords::F32(tex_coords_iter)) = reader.read_tex_coords(primitive.material().pbr_metallic_roughness().base_color_texture().unwrap().tex_coord()) {
-                        if let Some(normal_iter) = reader.read_normals() {
-                            let iter = izip!(vertex_iter, tex_coords_iter, normal_iter);
-                            for vertex in iter {
-                                vertices.push(ModelVertex {
-                                    position: [
-                                        vertex.0[0],
-                                        vertex.0[1],
-                                        vertex.0[2],
-                                    ],                                        
-                                    tex_coords: [vertex.1[0], vertex.1[1]],
-                                    normal: [
-                                        vertex.2[0],
-                                        vertex.2[1],
-                                        vertex.2[2],
-                                    ]
-                                })
-                            }
-                        }
+                let vertex_iter = reader.read_positions().unwrap();
+
+                let tex_coord = primitive.material().pbr_metallic_roughness().base_color_texture().unwrap().tex_coord();
+                let tex_coords_iter = match reader.read_tex_coords(tex_coord) {
+                    Some(gltf::mesh::util::ReadTexCoords::F32(tex_coords_iter)) => 
+                        tex_coords_iter
+                    ,
+                    _ => panic!(),
+                };
+                let normal_iter = reader.read_normals().unwrap();
+                let iter = izip!(vertex_iter, tex_coords_iter, normal_iter);
+                
+                // par_iter() は順序が維持されるが、par_bridge()は維持されない。
+                // par_iter()を使うためには、IntoParallelIteratorを実装する必要がある。
+                let vertices = iter.map(|vertex| {
+                    ModelVertex {
+                        position: [
+                            vertex.0[0],
+                            vertex.0[1],
+                            vertex.0[2],
+                        ],                                        
+                        tex_coords: [vertex.1[0], vertex.1[1]],
+                        normal: [
+                            vertex.2[0],
+                            vertex.2[1],
+                            vertex.2[2],
+                        ]
                     }
-                }
+                }).collect::<Vec<_>>();
                 let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("{:?} Vertex Buffer", path.as_ref())),
+                    label: Some(&format!("{:?} Vertex Buffer", label_path)),
                     contents: bytemuck::cast_slice(&vertices),
                     usage: wgpu::BufferUsage::VERTEX,
                 });
@@ -239,21 +248,20 @@ impl Model {
                 };
 
                 let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("{:?} Index Buffer", path.as_ref())),
+                    label: Some(&format!("{:?} Index Buffer", label_path)),
                     contents: bytemuck::cast_slice(&indices),
                     usage: wgpu::BufferUsage::INDEX,
                 });
 
-                meshes.push(Mesh {
+                Mesh {
                     name: mesh.name().unwrap().to_string(),
                     vertex_buffer,
                     index_buffer,
                     num_elements: primitive.indices().unwrap().count() as u32,
                     material: primitive.material().pbr_metallic_roughness().base_color_texture().unwrap().texture().index() as u32,
-                });
-            }
-        }
-
+                }
+            }).collect::<Vec<_>>()
+        }).flatten().collect();
 
         Ok(Self { meshes, materials })
     }

@@ -21,6 +21,7 @@ anyhow = "*"
 tobj = "*"
 gltf = { version = "*", features = ["utils", "names"] }
 itertools = "*"
+rayon = "*"
 
 
 [build-dependencies]
