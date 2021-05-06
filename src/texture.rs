@@ -35,7 +35,7 @@ impl Texture {
         let size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
-            depth: 1,
+            depth_or_array_layers: 1,
         };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
@@ -48,7 +48,7 @@ impl Texture {
         });
         queue.write_texture(
             // Tells wgpu where to copy the pixel data
-            wgpu::TextureCopyView {
+            wgpu::ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
@@ -56,10 +56,10 @@ impl Texture {
             // The actual pixel data
             &rgba,
             // The layout of the texture
-            wgpu::TextureDataLayout {
+            wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: 4 * dimensions.0,
-                rows_per_image: dimensions.1,
+                bytes_per_row: Some(std::num::NonZeroU32::new(4 * dimensions.0).unwrap()),
+                rows_per_image: Some(std::num::NonZeroU32::new(dimensions.1).unwrap()),
             },
             size,
         );
@@ -93,7 +93,7 @@ impl Texture {
             // 2.
             width: sc_desc.width,
             height: sc_desc.height,
-            depth: 1,
+            depth_or_array_layers: 1,
         };
         let desc = wgpu::TextureDescriptor {
             label: Some(label),
@@ -102,7 +102,7 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
-            usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT // 3.
+            usage: wgpu::TextureUsage::RENDER_ATTACHMENT // 3.
                 | wgpu::TextureUsage::SAMPLED,
         };
         let texture = device.create_texture(&desc);
@@ -127,7 +127,7 @@ impl Texture {
             view,
             sampler,
             id: 1000000,
-            tex_coord:0,
+            tex_coord: 0,
         }
     }
     pub fn load<P: AsRef<Path>>(
@@ -152,19 +152,22 @@ impl Texture {
         let source = texture.source();
         let sampler = texture.sampler();
         let (img, label) = match source.source() {
-            gltf::image::Source::View{ view,  mime_type } => {
+            gltf::image::Source::View { view, mime_type } => {
                 let buffer = &buffers[view.buffer().index()].0;
-                let data = &buffer[view.offset() .. view.offset()+view.length()];
+                let data = &buffer[view.offset()..view.offset() + view.length()];
                 let label = view.name().map(|str| str.to_string());
 
                 let img = match mime_type {
-                    "image/jpeq" =>image::load_from_memory_with_format(data, Jpeg),
+                    "image/jpeq" => image::load_from_memory_with_format(data, Jpeg),
                     "image/png" => image::load_from_memory_with_format(data, Png),
                     _ => panic!("mimetype"),
                 };
                 (img, label)
-            },
-            gltf::image::Source::Uri{ ref uri, mime_type } => {
+            }
+            gltf::image::Source::Uri {
+                ref uri,
+                mime_type: _,
+            } => {
                 let uri_dir = std::path::Path::new(env!("OUT_DIR")).join("res").join(uri);
                 let label = uri_dir.to_str().map(|str| str.to_string());
 
@@ -180,7 +183,7 @@ impl Texture {
         let size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
-            depth: 1,
+            depth_or_array_layers: 1,
         };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: label.as_deref(),
@@ -193,7 +196,7 @@ impl Texture {
         });
         queue.write_texture(
             // Tells wgpu where to copy the pixel data
-            wgpu::TextureCopyView {
+            wgpu::ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
@@ -201,10 +204,10 @@ impl Texture {
             // The actual pixel data
             &rgba,
             // The layout of the texture
-            wgpu::TextureDataLayout {
+            wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: 4 * dimensions.0,
-                rows_per_image: dimensions.1,
+                bytes_per_row: Some(std::num::NonZeroU32::new(4 * dimensions.0).unwrap()),
+                rows_per_image: Some(std::num::NonZeroU32::new(dimensions.1).unwrap()),
             },
             size,
         );

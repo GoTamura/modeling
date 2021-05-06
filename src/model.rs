@@ -1,14 +1,13 @@
 use crate::texture;
 use anyhow::*;
+use itertools::izip;
+use rayon::prelude::*;
 use std::ops::Range;
 use std::path::Path;
 use wgpu::util::DeviceExt;
-use itertools::izip;
-use rayon::prelude::*;
-
 
 pub trait Vertex {
-    fn desc<'a>() -> wgpu::VertexBufferDescriptor<'a>;
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a>;
 }
 
 #[repr(C)]
@@ -20,60 +19,75 @@ pub struct ModelVertex {
 }
 
 impl Vertex for ModelVertex {
-    fn desc<'a>() -> wgpu::VertexBufferDescriptor<'a> {
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         use std::mem;
-        wgpu::VertexBufferDescriptor {
-            stride: mem::size_of::<ModelVertex>() as wgpu::BufferAddress,
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<ModelVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::InputStepMode::Vertex,
             attributes: &[
-                wgpu::VertexAttributeDescriptor {
+                wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0,
-                    format: wgpu::VertexFormat::Float3,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
-                wgpu::VertexAttributeDescriptor {
+                wgpu::VertexAttribute {
                     offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
-                    format: wgpu::VertexFormat::Float2,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
-                wgpu::VertexAttributeDescriptor {
+                wgpu::VertexAttribute {
                     offset: mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
                     shader_location: 2,
-                    format: wgpu::VertexFormat::Float3,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
             ],
         }
     }
 }
 
-pub struct Model {
+//pub struct Renderer<'a> {
+//    render_pass: &'a wgpu::RenderPass,
+//}
+//pub trait RendererExt {
+//    fn draw();
+//}
+//
+//impl RendererExt for Renderer {
+//
+//}
+
+pub enum Model {
+    OBJ(ObjModel),
+    GLTF(GltfModel),
+}
+
+impl Model {
+    pub fn meshes(&self) -> &Vec<Mesh> {
+        match self {
+            Model::OBJ(ref m) => &m.meshes,
+            Model::GLTF(ref m) => &m.meshes,
+        }
+    }
+
+    pub fn materials(&self) -> &Vec<Material> {
+        match self {
+            Model::OBJ(m) => &m.materials,
+            Model::GLTF(m) => &m.materials,
+        }
+    }
+}
+pub struct ObjModel {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
 }
 
-pub enum ModelType {
-    OBJ,
-    GLTF,
+pub struct GltfModel {
+    pub meshes: Vec<Mesh>,
+    pub materials: Vec<Material>,
 }
 
-impl Model {
+impl ObjModel {
     pub async fn load<P: AsRef<Path>>(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        layout: &wgpu::BindGroupLayout,
-        path: P,
-        model_type: ModelType,
-    ) -> Result<Self> {
-        match model_type {
-            ModelType::OBJ => {
-                Model::load_obj(device, queue, layout, path).await
-            },
-            ModelType::GLTF => {
-                Model::load_gltf(device, queue, layout, path).await
-            }
-        }
-    }
-    async fn load_obj<P: AsRef<Path>>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
@@ -158,110 +172,141 @@ impl Model {
 
         Ok(Self { meshes, materials })
     }
+}
 
-    async fn load_gltf<P: AsRef<Path>>(
+impl GltfModel {
+    pub async fn load<P: AsRef<Path>>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
         path: P,
     ) -> Result<Self> {
+        let (gltf, buffers, _) = tokio::task::block_in_place(|| gltf::import(path.as_ref()))?;
 
-        let (gltf, buffers, _) = gltf::import(path.as_ref())?;
+        let materials = gltf
+            .materials()
+            .flat_map(|material| {
+                //let materials = gltf.materials().par_bridge().map(|material| {
+                if let Some(base_color_texture) =
+                    material.pbr_metallic_roughness().base_color_texture()
+                {
+                    let diffuse_texture =
+                        texture::Texture::load_gltf(device, queue, &base_color_texture, &buffers)
+                            .unwrap();
 
-        //let materials = gltf.materials().map(|material| { 
-        let materials = gltf.materials().par_bridge().map(|material| { 
-            let base_color_info = material.pbr_metallic_roughness().base_color_texture().unwrap();
+                    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                            },
+                        ],
+                        label: None,
+                    });
 
-            let diffuse_texture = texture::Texture::load_gltf(device, queue, &base_color_info, &buffers).unwrap();
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                    },
-                ],
-                label: None,
-            });
-
-            Material {
-                name: material.name().unwrap().to_string(),
-                diffuse_texture,
-                bind_group,
-                diffuse_texture_id: material.pbr_metallic_roughness().base_color_texture().unwrap().texture().index() as u32,
-            }
-        }
-        ).collect();
+                    Some(Material {
+                        name: material.name().unwrap().to_string(),
+                        diffuse_texture,
+                        bind_group,
+                        diffuse_texture_id: material
+                            .pbr_metallic_roughness()
+                            .base_color_texture()
+                            .unwrap()
+                            .texture()
+                            .index() as u32,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         let label_path = path.as_ref().to_str().map(|str| str.to_string());
 
         //let meshes = gltf.meshes().map(|mesh| {
-        let meshes = gltf.meshes().par_bridge().map(|mesh| {
-            println!("Mesh #{}", mesh.index());
-            //mesh.primitives().map(|primitive| {
-            mesh.primitives().par_bridge().map(|primitive| {
-                println!("- Primitive #{}", primitive.index());
-                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-                let vertex_iter = reader.read_positions().unwrap();
+        let meshes = gltf
+            .meshes()
+            .par_bridge()
+            .map(|mesh| {
+                println!("Mesh #{}", mesh.index());
+                //mesh.primitives().map(|primitive| {
+                mesh.primitives()
+                    .par_bridge()
+                    .map(|primitive| {
+                        println!("- Primitive #{}", primitive.index());
+                        let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+                        let vertex_iter = reader.read_positions().unwrap();
 
-                let tex_coord = primitive.material().pbr_metallic_roughness().base_color_texture().unwrap().tex_coord();
-                let tex_coords_iter = match reader.read_tex_coords(tex_coord) {
-                    Some(gltf::mesh::util::ReadTexCoords::F32(tex_coords_iter)) => 
-                        tex_coords_iter
-                    ,
-                    _ => panic!(),
-                };
-                let normal_iter = reader.read_normals().unwrap();
-                let iter = izip!(vertex_iter, tex_coords_iter, normal_iter);
-                
-                // par_iter() は順序が維持されるが、par_bridge()は維持されない。
-                // par_iter()を使うためには、IntoParallelIteratorを実装する必要がある。
-                let vertices = iter.map(|vertex| {
-                    ModelVertex {
-                        position: [
-                            vertex.0[0],
-                            vertex.0[1],
-                            vertex.0[2],
-                        ],                                        
-                        tex_coords: [vertex.1[0], vertex.1[1]],
-                        normal: [
-                            vertex.2[0],
-                            vertex.2[1],
-                            vertex.2[2],
-                        ]
-                    }
-                }).collect::<Vec<_>>();
-                let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("{:?} Vertex Buffer", label_path)),
-                    contents: bytemuck::cast_slice(&vertices),
-                    usage: wgpu::BufferUsage::VERTEX,
-                });
-                let indices = if let Some(gltf::mesh::util::ReadIndices::U32(indices_iter)) = reader.read_indices() {
-                    indices_iter.collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                };
+                        let tex_coord = primitive
+                            .material()
+                            .pbr_metallic_roughness()
+                            .base_color_texture()
+                            .unwrap()
+                            .tex_coord();
+                        let tex_coords_iter = match reader.read_tex_coords(tex_coord) {
+                            Some(gltf::mesh::util::ReadTexCoords::F32(tex_coords_iter)) => {
+                                tex_coords_iter
+                            }
+                            _ => panic!(),
+                        };
 
-                let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("{:?} Index Buffer", label_path)),
-                    contents: bytemuck::cast_slice(&indices),
-                    usage: wgpu::BufferUsage::INDEX,
-                });
+                        let normal_iter = reader.read_normals().unwrap();
+                        let iter = izip!(vertex_iter, tex_coords_iter, normal_iter);
 
-                Mesh {
-                    name: mesh.name().unwrap().to_string(),
-                    vertex_buffer,
-                    index_buffer,
-                    num_elements: primitive.indices().unwrap().count() as u32,
-                    material: primitive.material().pbr_metallic_roughness().base_color_texture().unwrap().texture().index() as u32,
-                }
-            }).collect::<Vec<_>>()
-        }).flatten().collect();
+                        // par_iter() は順序が維持されるが、par_bridge()は維持されない。
+                        // par_iter()を使うためには、IntoParallelIteratorを実装する必要がある。
+                        let vertices = iter
+                            .map(|vertex| ModelVertex {
+                                position: [vertex.0[0], vertex.0[1], vertex.0[2]],
+                                tex_coords: [vertex.1[0], vertex.1[1]],
+                                normal: [vertex.2[0], vertex.2[1], vertex.2[2]],
+                            })
+                            .collect::<Vec<_>>();
+                        let vertex_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some(&format!("{:?} Vertex Buffer", label_path)),
+                                contents: bytemuck::cast_slice(&vertices),
+                                usage: wgpu::BufferUsage::VERTEX,
+                            });
+                        let indices =
+                            if let Some(gltf::mesh::util::ReadIndices::U32(indices_iter)) =
+                                reader.read_indices()
+                            {
+                                indices_iter.collect::<Vec<_>>()
+                            } else {
+                                Vec::new()
+                            };
+
+                        let index_buffer =
+                            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some(&format!("{:?} Index Buffer", label_path)),
+                                contents: bytemuck::cast_slice(&indices),
+                                usage: wgpu::BufferUsage::INDEX,
+                            });
+
+                        Mesh {
+                            name: mesh.name().unwrap().to_string(),
+                            vertex_buffer,
+                            index_buffer,
+                            num_elements: primitive.indices().unwrap().count() as u32,
+                            material: primitive
+                                .material()
+                                .pbr_metallic_roughness()
+                                .base_color_texture()
+                                .unwrap()
+                                .texture()
+                                .index() as u32,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect();
 
         Ok(Self { meshes, materials })
     }
@@ -338,7 +383,7 @@ where
         light: &'b wgpu::BindGroup,
     ) {
         self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-        self.set_index_buffer(mesh.index_buffer.slice(..));
+        self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         self.set_bind_group(0, &material.bind_group, &[]);
         self.set_bind_group(1, &uniforms, &[]);
         self.set_bind_group(2, &light, &[]);
@@ -360,8 +405,12 @@ where
         uniforms: &'b wgpu::BindGroup,
         light: &'b wgpu::BindGroup,
     ) {
-        for mesh in &model.meshes {
-            let material = &model.materials.iter().find(|material| material.diffuse_texture_id == mesh.material).unwrap();
+        for mesh in model.meshes() {
+            let material = &model
+                .materials()
+                .iter()
+                .find(|material| material.diffuse_texture_id == mesh.material)
+                .unwrap();
             self.draw_mesh_instanced(mesh, material, instances.clone(), uniforms, light);
         }
     }
@@ -422,7 +471,7 @@ where
         light: &'b wgpu::BindGroup,
     ) {
         self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-        self.set_index_buffer(mesh.index_buffer.slice(..));
+        self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         self.set_bind_group(0, uniforms, &[]);
         self.set_bind_group(1, light, &[]);
         self.draw_indexed(0..mesh.num_elements, 0, instances);
@@ -443,7 +492,7 @@ where
         uniforms: &'b wgpu::BindGroup,
         light: &'b wgpu::BindGroup,
     ) {
-        for mesh in &model.meshes {
+        for mesh in model.meshes() {
             self.draw_light_mesh_instanced(mesh, instances.clone(), uniforms, light);
         }
     }
