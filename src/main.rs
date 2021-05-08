@@ -280,11 +280,7 @@ impl State {
                 label: Some("texture_bind_group_layout"),
             });
 
-        let camera = camera::Camera {
-            eye: (0.0, 1.0, 2.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
-            up: cgmath::Vector3::unit_y(),
-        };
+        let camera = camera::Camera::default();
         let camera_controller = camera::CameraController::new(0.2);
 
         let projection =
