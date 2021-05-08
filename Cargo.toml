@@ -3,6 +3,7 @@ name = "modeling"
 version = "0.1.0"
 authors = ["go"]
 edition = "2018"
+resolver = "2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,6 +22,13 @@ gltf = { version = "*", features = ["utils", "names"] }
 itertools = "*"
 rayon = "*"
 tokio = { version = "*", features = ["full"] }
+
+chrono = "0.4"
+egui = "*"
+egui_wgpu_backend = "*"
+egui_winit_platform = "*"
+epi = "*"
+egui_demo_lib = "*"
 
 
 [build-dependencies]

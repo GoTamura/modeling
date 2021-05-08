@@ -1,5 +1,5 @@
 use winit::{
-    event::*,
+    event::Event::*,
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
@@ -21,6 +21,32 @@ mod scene;
 mod texture;
 
 use crate::model::Vertex;
+
+
+use std::iter;
+use std::time::Instant;
+
+use chrono::Timelike;
+use egui::FontDefinitions;
+use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
+use egui_winit_platform::{Platform, PlatformDescriptor};
+use epi::*;
+const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
+enum Event {
+    RequestRedraw,
+}
+
+/// This is the repaint signal type that egui needs for requesting a repaint from another thread.
+/// It sends the custom RequestRedraw event to the winit event loop.
+struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<Event>>);
+
+impl epi::RepaintSignal for ExampleRepaintSignal {
+    fn request_repaint(&self) {
+        self.0.lock().unwrap().send_event(Event::RequestRedraw).ok();
+    }
+}
+
+
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -122,6 +148,11 @@ struct State {
     light: light::LightW,
     light_render_pipeline: wgpu::RenderPipeline,
     scene: scene::Scene,
+
+    repaint_signal: std::sync::Arc<ExampleRepaintSignal>,
+    platform: Platform,
+    egui_rpass: RenderPass,
+    demo_app: egui_demo_lib::WrapApp,
 }
 
 impl State {
@@ -223,7 +254,7 @@ impl State {
     }
 
     // Creating some of the wgpu types requires async code
-    async fn new(window: &Window, texture_format: wgpu::TextureFormat) -> Self {
+    async fn new(window: &Window, texture_format: wgpu::TextureFormat, event_loop: &EventLoop<Event>) -> Self {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
         let surface = unsafe { instance.create_surface(window) };
@@ -253,6 +284,27 @@ impl State {
             present_mode: wgpu::PresentMode::Fifo,
         };
         let swap_chain = device.create_swap_chain(&surface, &sc_desc);
+
+
+    let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
+        event_loop.create_proxy(),
+    )));
+
+    // We use the egui_winit_platform crate as the platform.
+    let mut platform = Platform::new(PlatformDescriptor {
+        physical_width: size.width as u32,
+        physical_height: size.height as u32,
+        scale_factor: window.scale_factor(),
+        font_definitions: FontDefinitions::default(),
+        style: Default::default(),
+    });
+
+    // We use the egui_wgpu_backend crate as the render backend.
+    let mut egui_rpass = RenderPass::new(&device, OUTPUT_FORMAT);
+
+    // Display the demo application that ships with egui.
+    let mut demo_app = egui_demo_lib::WrapApp::default();
+
 
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -444,6 +496,12 @@ impl State {
             light,
             light_render_pipeline,
             scene,
+
+            repaint_signal,
+            platform,
+            egui_rpass,
+            demo_app,
+
         }
     }
 
@@ -458,7 +516,7 @@ impl State {
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
     }
 
-    fn input(&mut self, event: &WindowEvent) -> bool {
+    fn input(&mut self, event: &winit::event::WindowEvent) -> bool {
         self.camera_controller.process_events(event)
     }
 
@@ -492,7 +550,7 @@ impl State {
         );
     }
 
-    fn render(&mut self) {
+    fn render(&mut self, start_time: Instant, previous_frame_time: &mut Option<f32>, window: &Window) {
         let frame = self
             .swap_chain
             .get_current_frame()
@@ -551,42 +609,96 @@ impl State {
                 );
             }
         }
+        {
+            self.platform.update_time(start_time.elapsed().as_secs_f64());
+
+
+                // Begin to draw the UI frame.
+                let egui_start = Instant::now();
+                self.platform.begin_frame();
+                let mut app_output = epi::backend::AppOutput::default();
+
+                let mut iframe = epi::backend::FrameBuilder {
+                    info: epi::IntegrationInfo {
+                        web_info: None,
+                        cpu_usage: *previous_frame_time,
+                        seconds_since_midnight: Some(seconds_since_midnight()),
+                        native_pixels_per_point: Some(window.scale_factor() as _),
+                    },
+                    tex_allocator: &mut self.egui_rpass,
+                    output: &mut app_output,
+                    repaint_signal: self.repaint_signal.clone(),
+                }
+                .build();
+
+                // Draw the demo application.
+                //use egui_demo_lib::WrapApp::*;
+                self.demo_app.update(&self.platform.context(), &mut iframe);
+
+                // End the UI frame. We could now handle the output and draw the UI with the backend.
+                let (_output, paint_commands) = self.platform.end_frame();
+                let paint_jobs = self.platform.context().tessellate(paint_commands);
+
+                let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
+                *previous_frame_time = Some(frame_time);
+
+                // Upload all resources for the GPU.
+                let screen_descriptor = ScreenDescriptor {
+                    physical_width: self.sc_desc.width,
+                    physical_height: self.sc_desc.height,
+                    scale_factor: window.scale_factor() as f32,
+                };
+                self.egui_rpass.update_texture(&self.device, &self.queue, &self.platform.context().texture());
+                self.egui_rpass.update_user_textures(&self.device, &self.queue);
+                self.egui_rpass.update_buffers(&mut self.device, &mut self.queue, &paint_jobs, &screen_descriptor);
+
+                // Record all render passes.
+                self.egui_rpass.execute(
+                    &mut encoder,
+                    &frame.view,
+                    &paint_jobs,
+                    &screen_descriptor,
+                    None, 
+                );
+            }
 
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 }
 
-async fn run(event_loop: EventLoop<()>, window: Window, swapchain_format: wgpu::TextureFormat) {
-    let mut state = State::new(&window, swapchain_format).await;
+async fn run(event_loop: EventLoop<Event>, window: Window, swapchain_format: wgpu::TextureFormat) {
+    let mut state = State::new(&window, swapchain_format, &event_loop).await;
 
+     let start_time = Instant::now();
+    let mut previous_frame_time = None;
     event_loop.run(move |event, _, control_flow| match event {
-        Event::RedrawRequested(_) => {
+        RedrawRequested(_) => {
             state.update();
-            state.render();
+            state.render(start_time, &mut previous_frame_time, &window);
         }
-        Event::MainEventsCleared => {
+        MainEventsCleared => {
             window.request_redraw();
         }
-        Event::WindowEvent {
+        WindowEvent {
             ref event,
             window_id,
         } if window_id == window.id() => {
             if !state.input(event) {
                 match event {
-                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                    WindowEvent::KeyboardInput { input, .. } => match input {
-                        KeyboardInput {
-                            state: ElementState::Pressed,
-                            virtual_keycode: Some(VirtualKeyCode::Escape),
+                    winit::event::WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    winit::event::WindowEvent::KeyboardInput { input, .. } => match input {
+                        winit::event::KeyboardInput {
+                            state: winit::event::ElementState::Pressed,
+                            virtual_keycode: Some(winit::event::VirtualKeyCode::Escape),
                             ..
                         } => *control_flow = ControlFlow::Exit,
                         _ => {}
                     },
-                    WindowEvent::Resized(physical_size) => {
+                    winit::event::WindowEvent::Resized(physical_size) => {
                         state.resize(*physical_size);
                     }
-                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                    winit::event::WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                         state.resize(**new_inner_size);
                     }
                     _ => {}
@@ -599,7 +711,7 @@ async fn run(event_loop: EventLoop<()>, window: Window, swapchain_format: wgpu::
 
 fn main() {
     env_logger::init();
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::with_user_event();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -629,4 +741,9 @@ fn main() {
             .expect("couldn't append canvas to document body");
         wasm_bindgen_futures::spawn_local(run(event_loop, window, wgpu::TextureFormat::Bgra8Unorm));
     }
+}
+
+pub fn seconds_since_midnight() -> f64 {
+    let time = chrono::Local::now().time();
+    time.num_seconds_from_midnight() as f64 + 1e-9 * (time.nanosecond() as f64)
 }
