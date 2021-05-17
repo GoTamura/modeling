@@ -93,13 +93,17 @@ impl ObjModel {
         layout: &wgpu::BindGroupLayout,
         path: P,
     ) -> Result<Self> {
-        let (obj_models, obj_materials) = tobj::load_obj(path.as_ref(), true)?;
+        let (obj_models, obj_materials) = tobj::load_obj(path.as_ref(), &tobj::LoadOptions {
+            triangulate: true,
+            .. tobj::LoadOptions::default()
+
+        })?;
 
         // We're assuming that the texture files are stored with the obj file
         let containing_folder = path.as_ref().parent().context("Directory has no parent")?;
 
         let mut materials = Vec::new();
-        for (i, mat) in obj_materials.into_iter().enumerate() {
+        for (i, mat) in obj_materials.unwrap().into_iter().enumerate() {
             let diffuse_path = mat.diffuse_texture;
             let diffuse_texture =
                 texture::Texture::load(device, queue, containing_folder.join(diffuse_path))

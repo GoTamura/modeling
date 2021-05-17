@@ -9,7 +9,7 @@ resolver = "2"
 
 [dependencies]
 image = "*"
-winit = { version = "*", features = ["web-sys"] }
+winit = { version = "0.24", features = ["web-sys"] }
 cgmath = "*"
 env_logger = "*"
 log = "*"
@@ -26,6 +26,7 @@ tokio = { version = "*", features = ["full"] }
 chrono = "0.4"
 egui = "*"
 egui_wgpu_backend = "*"
+#egui_wgpu_backend = { path = "../egui_wgpu_backend" }
 egui_winit_platform = "*"
 epi = "*"
 egui_demo_lib = "*"

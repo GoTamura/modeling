@@ -21,17 +21,16 @@ mod scene;
 mod texture;
 
 use crate::model::Vertex;
+use std::time::{Duration, Instant};
 
 
 use std::iter;
-use std::time::Instant;
 
 use chrono::Timelike;
 use egui::FontDefinitions;
 use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::*;
-const OUTPUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 enum Event {
     RequestRedraw,
 }
@@ -162,6 +161,63 @@ impl State {
         color_format: wgpu::TextureFormat,
         depth_format: Option<wgpu::TextureFormat>,
         vertex_layouts: &[wgpu::VertexBufferLayout],
+        shader: &wgpu::ShaderModule,
+        //vs_module: &wgpu::ShaderModule,
+        //fs_module: &wgpu::ShaderModule,
+    ) -> wgpu::RenderPipeline {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main", // 1.
+                buffers: vertex_layouts,
+            },
+            fragment: Some(wgpu::FragmentState {
+                // 2.
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrite::ALL,
+                }],
+            }),
+
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                ..Default::default()
+                //strip_index_format: None,
+                //cull_mode: Some(wgpu::Face::Back),
+                //polygon_mode: wgpu::PolygonMode::Fill,
+                //clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
+                //conservative: false,
+            },
+
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format.unwrap_or_else(|| texture::Texture::DEPTH_FORMAT),
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less, // 1.
+                stencil: wgpu::StencilState::default(),     // 2.
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            // {
+            //    count: 1,
+            //    mask: !0,
+            //    alpha_to_coverage_enabled: false,
+            //},
+        })
+    }
+
+    fn create_render_pipeline2(
+        device: &wgpu::Device,
+        layout: &wgpu::PipelineLayout,
+        color_format: wgpu::TextureFormat,
+        depth_format: Option<wgpu::TextureFormat>,
+        vertex_layouts: &[wgpu::VertexBufferLayout],
+        //shader: &wgpu::ShaderModule,
         vs_module: &wgpu::ShaderModule,
         fs_module: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
@@ -179,19 +235,20 @@ impl State {
                 entry_point: "main",
                 targets: &[wgpu::ColorTargetState {
                     format: color_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrite::ALL,
                 }],
             }),
 
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
-                conservative: false,
+                ..Default::default()
+                //strip_index_format: None,
+                //cull_mode: Some(wgpu::Face::Back),
+                //polygon_mode: wgpu::PolygonMode::Fill,
+                //clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
+                //conservative: false,
             },
 
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -201,11 +258,12 @@ impl State {
                 stencil: wgpu::StencilState::default(),     // 2.
                 bias: wgpu::DepthBiasState::default(),
             }),
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
+            multisample: wgpu::MultisampleState::default(),
+            // {
+            //    count: 1,
+            //    mask: !0,
+            //    alpha_to_coverage_enabled: false,
+            //},
         })
     }
 
@@ -215,20 +273,23 @@ impl State {
         color_format: wgpu::TextureFormat,
         depth_format: Option<wgpu::TextureFormat>,
         vertex_layouts: &[wgpu::VertexBufferLayout],
+        //shader: &wgpu::ShaderModuleDescriptor,
         vertex_shader: &wgpu::ShaderModuleDescriptor,
         fragent_shader: &wgpu::ShaderModuleDescriptor,
     ) -> wgpu::RenderPipeline {
         let vs_module = device.create_shader_module(vertex_shader);
         let fs_module = device.create_shader_module(fragent_shader);
+        //let shader_module = device.create_shader_module(&shader);
 
-        Self::create_render_pipeline(
+        Self::create_render_pipeline2(
             &device,
             &layout,
             color_format,
             depth_format,
             vertex_layouts,
+            //&shader_module,
             &vs_module,
-            &fs_module,
+            &fs_module
         )
     }
 
@@ -242,7 +303,7 @@ impl State {
         let vs_module = device.create_shader_module(&wgpu::include_spirv!("light.vert.spv"));
         let fs_module = device.create_shader_module(&wgpu::include_spirv!("light.frag.spv"));
 
-        Self::create_render_pipeline(
+        Self::create_render_pipeline2(
             &device,
             &layout,
             color_format,
@@ -278,7 +339,8 @@ impl State {
             .expect("Unable to find a suitable GPU adapter!");
         let sc_desc = wgpu::SwapChainDescriptor {
             usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
-            format: texture_format,
+            //format: texture_format,
+            format: adapter.get_swap_chain_preferred_format(&surface).unwrap(),
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
@@ -300,7 +362,7 @@ impl State {
     });
 
     // We use the egui_wgpu_backend crate as the render backend.
-    let mut egui_rpass = RenderPass::new(&device, OUTPUT_FORMAT);
+    let mut egui_rpass = RenderPass::new(&device, sc_desc.format);
 
     // Display the demo application that ships with egui.
     let mut demo_app = egui_demo_lib::WrapApp::default();
@@ -414,14 +476,13 @@ impl State {
         });
 
         let res_dir = std::path::Path::new(env!("OUT_DIR")).join("res");
-        //let obj_model = model::Model::load(
+        //let model = model::ObjModel::load(
         //    &device,
         //    &queue,
         //    &texture_bind_group_layout,
         //    res_dir.join("monkey.obj"),
-        //    model::ModelType::OBJ
-        //)
-        let gltf_model = model::GltfModel::load(
+        //);
+        let model = model::GltfModel::load(
             &device,
             &queue,
             &texture_bind_group_layout,
@@ -444,14 +505,20 @@ impl State {
             });
             let vertex_shader = wgpu::include_spirv!("shader.vert.spv");
             let fragment_shader = wgpu::include_spirv!("shader.frag.spv");
+            let shader = wgpu::ShaderModuleDescriptor {
+                label: Some("Normal Shader"),
+                flags: wgpu::ShaderFlags::all(),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into())
+            };
             Self::create_box_render_pipeline(
                 &device,
                 &layout,
                 sc_desc.format,
                 Some(texture::Texture::DEPTH_FORMAT),
                 &[model::ModelVertex::desc(), InstanceRaw::desc()],
+                //&shader,
                 &vertex_shader,
-                &fragment_shader,
+                &fragment_shader
             )
         };
         let light_render_pipeline = {
@@ -469,7 +536,8 @@ impl State {
             )
         };
 
-        let model = model::Model::GLTF(gltf_model.await.unwrap());
+        //let model = model::Model::OBJ(model.await.unwrap());
+        let model = model::Model::GLTF(model.await.unwrap());
         let mut scene = scene::Scene {
             models: Vec::new(),
             lights: Vec::new(),
@@ -599,14 +667,14 @@ impl State {
                     &self.light.bind_group,
                 );
 
-                render_pass.set_pipeline(&self.light_render_pipeline);
-                use model::DrawLight;
+                //render_pass.set_pipeline(&self.light_render_pipeline);
+                //use model::DrawLight;
 
-                render_pass.draw_light_model(
-                    &model,
-                    &self.uniform_bind_group,
-                    &self.light.bind_group,
-                );
+                //render_pass.draw_light_model(
+                //    &model,
+                //    &self.uniform_bind_group,
+                //    &self.light.bind_group,
+                //);
             }
         }
         {
@@ -650,7 +718,7 @@ impl State {
                 };
                 self.egui_rpass.update_texture(&self.device, &self.queue, &self.platform.context().texture());
                 self.egui_rpass.update_user_textures(&self.device, &self.queue);
-                self.egui_rpass.update_buffers(&mut self.device, &mut self.queue, &paint_jobs, &screen_descriptor);
+                self.egui_rpass.update_buffers(&mut self.device, &mut self.queue, &paint_jobs[..], &screen_descriptor);
 
                 // Record all render passes.
                 self.egui_rpass.execute(
@@ -672,13 +740,30 @@ async fn run(event_loop: EventLoop<Event>, window: Window, swapchain_format: wgp
 
      let start_time = Instant::now();
     let mut previous_frame_time = None;
-    event_loop.run(move |event, _, control_flow| match event {
+    let mut last_update_inst = Instant::now();
+    event_loop.run(move |event, _, control_flow| {
+        state.platform.handle_event(&event);
+         match event {
         RedrawRequested(_) => {
-            state.update();
             state.render(start_time, &mut previous_frame_time, &window);
         }
+        RedrawEventsCleared => {
+                    let target_frametime = Duration::from_secs_f64(1.0 / 60.0);
+                    let time_since_last_frame = last_update_inst.elapsed();
+                    if time_since_last_frame >= target_frametime {
+                        window.request_redraw();
+                        last_update_inst = Instant::now();
+                    } else {
+                        *control_flow = ControlFlow::WaitUntil(
+                            Instant::now() + target_frametime - time_since_last_frame,
+                        );
+                    }
+
+
+            //window.request_redraw();
+        }
         MainEventsCleared => {
-            window.request_redraw();
+            state.update();
         }
         WindowEvent {
             ref event,
@@ -706,6 +791,7 @@ async fn run(event_loop: EventLoop<Event>, window: Window, swapchain_format: wgp
             }
         }
         _ => {}
+    }
     });
 }
 
@@ -721,6 +807,7 @@ fn main() {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
+            //run(event_loop, window, wgpu::TextureFormat::Bgra8UnormSrgb).await;
             run(event_loop, window, wgpu::TextureFormat::Bgra8UnormSrgb).await;
         })
     }
