@@ -2,6 +2,7 @@ use anyhow::*;
 use glob::glob;
 use std::fs::{read_to_string, write};
 use std::path::PathBuf;
+use std::path::Path;
 use rayon::prelude::*;
 
 use std::env;
@@ -73,7 +74,8 @@ fn main() -> Result<()> {
             "main",
             None,
         )?;
-        write(shader.spv_path, compiled.as_binary_u8())?;
+        write(&shader.spv_path, compiled.as_binary_u8())?;
+        write(Path::new(&env::var("OUT_DIR").unwrap()).join(shader.spv_path.file_name().unwrap()), compiled.as_binary_u8())?;
     }
 
     println!("cargo:rerun-if-changed=res/*");

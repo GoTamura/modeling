@@ -273,13 +273,14 @@ impl CameraController {
                 self.cursor_position_current.0 - self.cursor_position_before.0,
                 self.cursor_position_current.1 - self.cursor_position_before.1,
             );
-            const SENSITIVITY: f32 = 0.007;
+            const SENSITIVITY: f32 = 0.003;
             if self.is_shift_pressed {
                 let right = forward.normalize().cross(camera.up);
-                camera.eye += -right * SENSITIVITY * cursor_diff.0 as f32;
-                camera.eye += camera.up * SENSITIVITY * cursor_diff.1 as f32;
-                camera.target += -right * SENSITIVITY * cursor_diff.0 as f32;
-                camera.target += camera.up * SENSITIVITY * cursor_diff.1 as f32;
+                let mag = forward.magnitude();
+                camera.eye += -right * SENSITIVITY * mag * cursor_diff.0 as f32;
+                camera.eye += camera.up * SENSITIVITY * mag * cursor_diff.1 as f32;
+                camera.target += -right * SENSITIVITY * mag * cursor_diff.0 as f32;
+                camera.target += camera.up * SENSITIVITY * mag * cursor_diff.1 as f32;
             } else {
                 let forward = camera.target - camera.eye;
                 let right = forward.normalize().cross(camera.up);
