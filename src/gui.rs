@@ -15,7 +15,6 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-
 fn seconds_since_midnight() -> f64 {
     let time = chrono::Local::now().time();
     time.num_seconds_from_midnight() as f64 + 1e-9 * (time.nanosecond() as f64)

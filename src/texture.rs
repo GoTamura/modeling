@@ -20,7 +20,7 @@ impl Texture {
         bytes: &[u8],
         label: Option<&str>,
         is_normal_map: bool,
-    ) ->Self {
+    ) -> Self {
         let rgba = bytes;
         let dimensions = (1, 1);
 
@@ -39,7 +39,6 @@ impl Texture {
                 wgpu::TextureFormat::Rgba8Unorm
             } else {
                 wgpu::TextureFormat::Rgba8UnormSrgb
-
             },
             usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
         });
@@ -116,7 +115,6 @@ impl Texture {
                 wgpu::TextureFormat::Rgba8Unorm
             } else {
                 wgpu::TextureFormat::Rgba8UnormSrgb
-
             },
             usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
         });
@@ -208,7 +206,7 @@ impl Texture {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         path: P,
-        is_normal_map: bool
+        is_normal_map: bool,
     ) -> Result<Self> {
         let path_copy = path.as_ref().to_path_buf();
         let label = path_copy.to_str();

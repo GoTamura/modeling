@@ -1,4 +1,4 @@
-use winit::event::*;
+use winit::{dpi::PhysicalSize, event::*};
 
 use cgmath::InnerSpace;
 
@@ -10,6 +10,7 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
+#[derive(Debug)]
 pub struct Projection {
     pub aspect: f32,
     pub fovy: cgmath::Rad<f32>,
@@ -42,22 +43,26 @@ impl Projection {
     }
 }
 
+#[derive(Debug)]
 pub struct Camera {
     pub eye: cgmath::Point3<f32>,
     pub target: cgmath::Point3<f32>,
     pub up: cgmath::Vector3<f32>,
+    pub projection: Projection,
 }
 
 impl Camera {
     pub fn calc_matrix(&self) -> cgmath::Matrix4<f32> {
         cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up)
     }
-    
-    pub fn default() -> Self {
+    pub fn new(size: PhysicalSize<u32>) -> Self {
+        let projection = Projection::new(size.width, size.height, cgmath::Deg(45.0), 0.1, 100000.0);
+
         Self {
             eye: (3.0, 4.0, -6.0).into(),
             target: (0.0, 0.0, 0.0).into(),
             up: cgmath::Vector3::unit_y(),
+            projection,
         }
     }
 }
@@ -79,10 +84,11 @@ pub struct CameraController {
     scroll: f32,
     cursor_position_before: (f64, f64),
     cursor_position_current: (f64, f64),
+    pub size: PhysicalSize<u32>,
 }
 
 impl CameraController {
-    pub fn new(speed: f32) -> Self {
+    pub fn new(speed: f32, size: PhysicalSize<u32>) -> Self {
         Self {
             speed,
             is_up_pressed: false,
@@ -100,10 +106,12 @@ impl CameraController {
             scroll: 0.,
             cursor_position_before: (0., 0.),
             cursor_position_current: (0., 0.),
+            size,
         }
     }
 
-    pub fn process_events(&mut self, event: &WindowEvent) -> bool {
+    pub fn process_events(&mut self, event: &WindowEvent, size: PhysicalSize<u32>) -> bool {
+        self.size = size;
         match event {
             WindowEvent::KeyboardInput {
                 input:
@@ -277,10 +285,10 @@ impl CameraController {
             if self.is_shift_pressed {
                 let right = forward.normalize().cross(camera.up);
                 let mag = forward.magnitude();
-                camera.eye += -right * SENSITIVITY * mag * cursor_diff.0 as f32;
-                camera.eye += camera.up * SENSITIVITY * mag * cursor_diff.1 as f32;
-                camera.target += -right * SENSITIVITY * mag * cursor_diff.0 as f32;
-                camera.target += camera.up * SENSITIVITY * mag * cursor_diff.1 as f32;
+                camera.eye += -right * 2. * mag * cursor_diff.0 as f32 / self.size.width as f32 * f32::tan(camera.projection.fovy.0);
+                camera.eye += camera.up * 2. * mag * cursor_diff.1 as f32 / self.size.height as f32* f32::tan(camera.projection.fovy.0);
+                camera.target += -right * 2. * mag * cursor_diff.0 as f32 / self.size.width as f32* f32::tan(camera.projection.fovy.0);
+                camera.target += camera.up * 2. * mag * cursor_diff.1 as f32 / self.size.height as f32* f32::tan(camera.projection.fovy.0);
             } else {
                 let forward = camera.target - camera.eye;
                 let right = forward.normalize().cross(camera.up);

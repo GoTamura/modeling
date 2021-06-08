@@ -1,3 +1,9 @@
+use crate::camera::Camera;
+use crate::camera::Projection;
+use crate::light;
+use crate::light::Light;
+use crate::renderer;
+use crate::renderer::Uniforms;
 use crate::shader;
 use crate::texture;
 use anyhow::*;
@@ -5,6 +11,7 @@ use itertools::izip;
 use rayon::prelude::*;
 use std::ops::Range;
 use std::path::Path;
+use tokio::process;
 use wgpu::util::DeviceExt;
 
 pub trait Vertex {
@@ -58,17 +65,6 @@ impl Vertex for ModelVertex {
     }
 }
 
-// pub struct Renderer<'a> {
-//     render_pass: &'a wgpu::RenderPass,
-// }
-// pub trait RendererExt {
-//     fn draw();
-// }
-//
-// impl RendererExt for Renderer {
-//
-// }
-
 #[derive(Debug)]
 pub enum Model {
     OBJ(ObjModel),
@@ -106,8 +102,12 @@ impl ObjModel {
     pub async fn load<P: AsRef<Path>>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        layout: &wgpu::BindGroupLayout,
         path: P,
+        sc_desc: &wgpu::SwapChainDescriptor,
+        camera: &Camera,
+        light: &Light,
+        uniforms: &Uniforms,
+        layout: &wgpu::BindGroupLayout,
     ) -> Result<Self> {
         let (obj_models, obj_materials) = tobj::load_obj(
             path.as_ref(),
@@ -178,58 +178,26 @@ impl ObjModel {
                 )
             };
 
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&normal_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Sampler(&normal_texture.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(&specular_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Sampler(&specular_texture.sampler),
-                    },
-                ],
-                label: None,
-            });
-
-            let vert = shader::Shader::new(
+            let shader = shader::Shader::new(
                 "obj vertex shader",
-                std::path::Path::new(env!("OUT_DIR")).join("shader.vert.spv"),
+                std::path::Path::new(env!("OUT_DIR")).join("shader"),
                 device,
+                &layout,
+                &light.bind_group_layout,
+                &uniforms.bind_group_layout,
+                &sc_desc.format,
             );
-            let frag = shader::Shader::new(
-                "obj fragment shader",
-                std::path::Path::new(env!("OUT_DIR")).join("shader.frag.spv"),
-                device,
-            );
-            let shaders = vec![vert, frag];
 
-            materials.push(Material {
-                name: mat.name,
+            materials.push(Material::new(
+                device,
+                &mat.name,
                 diffuse_texture,
                 normal_texture,
                 specular_texture,
-                bind_group,
-                id: i as u32,
-                shaders,
-            });
+                i as u32,
+                &layout,
+                shader,
+            ));
         }
 
         let mut meshes = Vec::new();
@@ -242,7 +210,7 @@ impl ObjModel {
                         m.mesh.positions[i * 3 + 1],
                         m.mesh.positions[i * 3 + 2],
                     ],
-                    tex_coords: [m.mesh.texcoords[i * 2], m.mesh.texcoords[i * 2 + 1]],
+                    tex_coords: [m.mesh.texcoords[i * 2], 1.0 -  m.mesh.texcoords[i * 2 + 1]],
                     normal: [
                         m.mesh.normals[i * 3],
                         m.mesh.normals[i * 3 + 1],
@@ -309,6 +277,10 @@ impl ObjModel {
 
         Ok(Self { meshes, materials })
     }
+
+    //pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
+    //    self.renderer.update(queue, camera);
+    //}
 }
 
 //impl GltfModel {
@@ -457,7 +429,61 @@ pub struct Material {
     pub specular_texture: texture::Texture,
     pub id: u32,
     pub bind_group: wgpu::BindGroup,
-    pub shaders: Vec<shader::Shader>,
+    pub shader: shader::Shader,
+}
+
+impl Material {
+    pub fn new(
+        device: &wgpu::Device,
+        name: &str,
+        diffuse_texture: texture::Texture,
+        normal_texture: texture::Texture,
+        specular_texture: texture::Texture,
+        id: u32,
+        layout: &wgpu::BindGroupLayout,
+        shader: shader::Shader,
+    ) -> Self {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&normal_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&normal_texture.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&specular_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&specular_texture.sampler),
+                },
+            ],
+            label: None,
+        });
+
+        Self {
+            name: name.to_string(),
+            diffuse_texture,
+            normal_texture,
+            specular_texture,
+            bind_group,
+            id,
+            shader,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -528,9 +554,12 @@ where
         self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         match material {
             Some(m) => {
+                self.set_pipeline(&m.shader.render_pipeline);
                 self.set_bind_group(0, &m.bind_group, &[]);
             }
-            None => {}
+            None => {
+                todo!();
+            }
         }
         self.set_bind_group(1, &uniforms, &[]);
         self.set_bind_group(2, &light, &[]);
