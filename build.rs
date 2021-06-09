@@ -66,14 +66,14 @@ fn main() -> Result<()> {
                     resolved_name: name.to_string(),
                     content: std::fs::read_to_string(path.parent().unwrap().join(name)).unwrap(),
                 })
-            },
+            }
             shaderc::IncludeType::Standard => {
                 let path = std::path::Path::new("src/shaders");
                 Ok(shaderc::ResolvedInclude {
                     resolved_name: name.to_string(),
                     content: std::fs::read_to_string(path.parent().unwrap().join(name)).unwrap(),
                 })
-            },
+            }
         },
     );
 

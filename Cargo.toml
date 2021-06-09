@@ -8,22 +8,28 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-image = "*"
-winit = { version = "0.24", features = ["web-sys"] }
-cgmath = "*"
-env_logger = "*"
-log = "*"
-wgpu = "*"
-futures = { version = "*", features = ["thread-pool"] }
-bytemuck = { version = "*", features = ["derive"] }
 anyhow = "*"
-tobj = "*"
-gltf = { version = "*", features = ["utils", "names"] }
+thiserror = "*"
+structopt = "*"
 itertools = "*"
+env_logger = "*"
+
+chrono = "0.4"
+log = "*"
+futures = { version = "*", features = ["thread-pool"] }
+
 rayon = "*"
 tokio = { version = "*", features = ["full"] }
 
-chrono = "0.4"
+image = "*"
+tobj = "*"
+cgmath = "*"
+gltf = { version = "*", features = ["utils", "names"] }
+
+winit = { version = "0.24", features = ["web-sys"] }
+wgpu = "*"
+bytemuck = { version = "*", features = ["derive"] }
+
 egui = "*"
 egui_wgpu_backend = "*"
 #egui_wgpu_backend = { path = "../egui_wgpu_backend" }

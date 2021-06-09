@@ -6,6 +6,17 @@ use winit::{
 
 use std::time::Instant;
 
+use std::path::PathBuf;
+use structopt::StructOpt;
+
+/// A basic example
+#[derive(StructOpt, Debug)]
+#[structopt(name = "basic")]
+struct Opt {
+    #[structopt(name = "FILE", parse(from_os_str))]
+    files: Option<PathBuf>,
+}
+
 async fn run(
     event_loop: EventLoop<gui::Event>,
     window: Window,
@@ -30,6 +41,7 @@ async fn run(
 }
 
 fn main() {
+    let opt = Opt::from_args();
     env_logger::init();
     let event_loop = EventLoop::with_user_event();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
