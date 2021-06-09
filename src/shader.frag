@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : enable
+
+#include "test.glsl"
 
 layout(location=0) in vec2 v_tex_coords;
 layout(location=1) in vec3 v_position;
@@ -31,7 +34,8 @@ void main() {
     vec3 normal = normalize(object_normal.rgb * 2.0 - 1.0);
     vec3 light_dir = normalize(v_light_position - v_position);
 
-    float diffuse_strength = max(dot(normal, light_dir), 0.);
+    //float diffuse_strength = max(dot(normal, light_dir), 0.);
+    float diffuse_strength = diffuse_s(normal, light_dir);
     vec3 diffuse_color = light_color * diffuse_strength;
 
     vec3 view_dir = normalize(v_view_position - v_position);

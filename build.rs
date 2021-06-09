@@ -1,13 +1,12 @@
 use anyhow::*;
 use glob::glob;
-use std::fs::{read_to_string, write};
-use std::path::PathBuf;
-use std::path::Path;
 use rayon::prelude::*;
+use std::fs::{read_to_string, write};
+use std::path::Path;
+use std::path::PathBuf;
 
-use std::env;
 use fs_extra::{copy_items, dir::CopyOptions};
-
+use std::env;
 
 struct ShaderData {
     src: String,
@@ -58,6 +57,25 @@ fn main() -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
 
     let mut compiler = shaderc::Compiler::new().context("Unable to create shader compiler")?;
+    let mut options = shaderc::CompileOptions::new().unwrap();
+    options.set_include_callback(
+        |name, include_type, source_name, depth| match include_type {
+            shaderc::IncludeType::Relative => {
+                let path = std::path::Path::new(source_name);
+                Ok(shaderc::ResolvedInclude {
+                    resolved_name: name.to_string(),
+                    content: std::fs::read_to_string(path.parent().unwrap().join(name)).unwrap(),
+                })
+            },
+            shaderc::IncludeType::Standard => {
+                let path = std::path::Path::new("src/shaders");
+                Ok(shaderc::ResolvedInclude {
+                    resolved_name: name.to_string(),
+                    content: std::fs::read_to_string(path.parent().unwrap().join(name)).unwrap(),
+                })
+            },
+        },
+    );
 
     // This can't be parallelized. The [shaderc::Compiler] is not
     // thread safe. Also, it creates a lot of resources. You could
@@ -72,10 +90,13 @@ fn main() -> Result<()> {
             shader.kind,
             &shader.src_path.to_str().unwrap(),
             "main",
-            None,
+            Some(&options),
         )?;
         write(&shader.spv_path, compiled.as_binary_u8())?;
-        write(Path::new(&env::var("OUT_DIR").unwrap()).join(shader.spv_path.file_name().unwrap()), compiled.as_binary_u8())?;
+        write(
+            Path::new(&env::var("OUT_DIR").unwrap()).join(shader.spv_path.file_name().unwrap()),
+            compiled.as_binary_u8(),
+        )?;
     }
 
     println!("cargo:rerun-if-changed=res/*");
