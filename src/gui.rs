@@ -132,7 +132,7 @@ impl Gui {
             .execute(encoder, &frame_view, &paint_jobs, &screen_descriptor, None);
     }
 
-    pub fn handle_event(&mut self, event: &winit::event::Event<Event>) {
-        self.platform.handle_event(&event);
+    pub fn handle_event<T>(&mut self, event: &winit::event::Event<T>) {
+        self.platform.handle_event(event);
     }
 }

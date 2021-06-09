@@ -26,7 +26,7 @@ tobj = "*"
 cgmath = "*"
 gltf = { version = "*", features = ["utils", "names"] }
 
-winit = { version = "0.24", features = ["web-sys"] }
+winit = { version = "*", features = ["web-sys"] }
 wgpu = "*"
 bytemuck = { version = "*", features = ["derive"] }
 
