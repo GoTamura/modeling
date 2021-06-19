@@ -73,6 +73,10 @@ pub struct CameraController {
     is_down_pressed: bool,
     is_forward_pressed: bool,
     is_backward_pressed: bool,
+    is_move_left_pressed: bool,
+    is_move_right_pressed: bool,
+    is_move_up_pressed: bool,
+    is_move_down_pressed: bool,
     is_left_pressed: bool,
     is_right_pressed: bool,
     is_middle_pressed: bool,
@@ -93,6 +97,10 @@ impl CameraController {
             speed,
             is_up_pressed: false,
             is_down_pressed: false,
+            is_move_left_pressed: false,
+            is_move_right_pressed: false,
+            is_move_up_pressed: false,
+            is_move_down_pressed: false,
             is_forward_pressed: false,
             is_backward_pressed: false,
             is_left_pressed: false,
@@ -124,44 +132,61 @@ impl CameraController {
             } => {
                 let is_pressed = *state == ElementState::Pressed;
                 match keycode {
-                    VirtualKeyCode::Q | VirtualKeyCode::Space | VirtualKeyCode::Numpad8 => {
-                        self.is_up_pressed = is_pressed;
-                        true
-                    }
-                    VirtualKeyCode::R | VirtualKeyCode::Numpad2 => {
-                        self.is_down_pressed = is_pressed;
-                        true
-                    }
-                    VirtualKeyCode::W | VirtualKeyCode::Up => {
+                    VirtualKeyCode::W => {
                         self.is_forward_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::A | VirtualKeyCode::Left | VirtualKeyCode::Numpad4 => {
-                        self.is_left_pressed = is_pressed;
-                        true
-                    }
-                    VirtualKeyCode::S | VirtualKeyCode::Down => {
+                    VirtualKeyCode::S => {
                         self.is_backward_pressed = is_pressed;
                         true
                     }
-                    VirtualKeyCode::D | VirtualKeyCode::Right | VirtualKeyCode::Numpad6 => {
-                        self.is_right_pressed = is_pressed;
+                    VirtualKeyCode::A => {
+                        self.is_move_left_pressed = is_pressed;
+                        true
+                    }
+                    VirtualKeyCode::D => {
+                        self.is_move_right_pressed = is_pressed;
+                        true
+                    }
+                    VirtualKeyCode::E => {
+                        self.is_move_up_pressed = is_pressed;
+                        true
+                    }
+                    VirtualKeyCode::Q => {
+                        self.is_move_down_pressed = is_pressed;
                         true
                     }
                     VirtualKeyCode::LShift => {
                         self.is_shift_pressed = is_pressed;
                         true
                     }
+
                     VirtualKeyCode::Numpad1 => {
                         self.is_camera_front_pressed = is_pressed;
+                        true
+                    }
+                    VirtualKeyCode::Numpad2 => {
+                        self.is_down_pressed = is_pressed;
+                        true
+                    }
+                    VirtualKeyCode::Numpad4 => {
+                        self.is_left_pressed = is_pressed;
                         true
                     }
                     VirtualKeyCode::Numpad3 => {
                         self.is_camera_right_pressed = is_pressed;
                         true
                     }
+                    VirtualKeyCode::Numpad6 => {
+                        self.is_right_pressed = is_pressed;
+                        true
+                    }
                     VirtualKeyCode::Numpad7 => {
                         self.is_camera_top_pressed = is_pressed;
+                        true
+                    }
+                    VirtualKeyCode::Numpad8 => {
+                        self.is_up_pressed = is_pressed;
                         true
                     }
                     _ => false,
@@ -274,6 +299,45 @@ impl CameraController {
             camera.eye = cgmath::Point3::new(0., forward_mag, 0.);
             camera.target = cgmath::Point3::new(0., 0., 0.);
             camera.up = cgmath::Vector3::new(0., 0., 1.);
+        }
+
+        if self.is_forward_pressed {
+            const SENSITIVITY: f32 = 0.003;
+            let mag = forward.magnitude();
+            camera.eye += forward.normalize() *  mag * SENSITIVITY;
+            camera.target += forward.normalize() *  mag * SENSITIVITY;
+        }
+        if self.is_backward_pressed {
+            const SENSITIVITY: f32 = 0.003;
+            let mag = forward.magnitude();
+            camera.eye += -forward.normalize() *  mag * SENSITIVITY;
+            camera.target += -forward.normalize() *  mag * SENSITIVITY;
+        }
+        if self.is_move_left_pressed {
+            const SENSITIVITY: f32 = 0.003;
+            let right = forward.normalize().cross(camera.up);
+            let mag = forward.magnitude();
+            camera.eye += -right *  mag * SENSITIVITY;
+            camera.target += -right *  mag * SENSITIVITY;
+        }
+        if self.is_move_right_pressed {
+            const SENSITIVITY: f32 = 0.003;
+            let right = forward.normalize().cross(camera.up);
+            let mag = forward.magnitude();
+            camera.eye += right *  mag * SENSITIVITY;
+            camera.target += right *  mag * SENSITIVITY;
+        }
+        if self.is_move_up_pressed {
+            const SENSITIVITY: f32 = 0.003;
+            let mag = forward.magnitude();
+            camera.eye += camera.up * mag * SENSITIVITY;
+            camera.target += camera.up * mag * SENSITIVITY;
+        }
+        if self.is_move_down_pressed {
+            const SENSITIVITY: f32 = 0.003;
+            let mag = forward.magnitude();
+            camera.eye += -camera.up * mag * SENSITIVITY;
+            camera.target += -camera.up * mag * SENSITIVITY;
         }
 
         if self.is_middle_pressed {
