@@ -8,43 +8,42 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "*"
-thiserror = "*"
-structopt = "*"
-itertools = "*"
-env_logger = "*"
+anyhow = "1.0.41"
+thiserror = "1.0.25"
+structopt = "0.3.21"
+itertools = "0.10.1"
+env_logger = "0.8.4"
 
-chrono = "0.4"
-log = "*"
-futures = { version = "*", features = ["thread-pool"] }
+chrono = "0.4.19"
+log = "0.4.14"
+futures = { version = "0.3.15", features = ["thread-pool"] }
 
-rayon = "*"
-tokio = { version = "*", features = ["full"] }
+rayon = "1.5.1"
+tokio = { version = "1.7.1", features = ["full"] }
 
-image = "*"
-tobj = "*"
-cgmath = "*"
-gltf = { version = "*", features = ["utils", "names"] }
+image = "0.23.14"
+tobj = "3.0.1"
+cgmath = "0.18.0"
+gltf = { version = "0.16.0", features = ["utils", "names"] }
 
-winit = { version = "*", features = ["web-sys"] }
-wgpu = "*"
-bytemuck = { version = "*", features = ["derive"] }
+winit = { version = "0.25.0", features = ["web-sys"] }
+wgpu = "0.9.0"
+bytemuck = { version = "1.7.0", features = ["derive"] }
 
-egui = "*"
-egui_wgpu_backend = "*"
-#egui_wgpu_backend = { path = "../egui_wgpu_backend" }
-egui_winit_platform = "*"
-epi = "*"
-egui_demo_lib = "*"
+egui = "0.13.1"
+egui_wgpu_backend = "0.10.0"
+egui_winit_platform = "0.9.0"
+epi = "0.13.0"
+egui_demo_lib = "0.13.0"
 
 
 [build-dependencies]
-anyhow = "*"
-fs_extra = "*"
-glob = "*"
-rayon = "*"
-shaderc = "*"
+anyhow = "1.0.41"
+fs_extra = "1.2.0"
+glob = "0.3.0"
+rayon = "1.5.1"
+shaderc = "0.7.2"
 
 
 [dev-dependencies]
-log = "*"
+log = "0.4.14"

@@ -58,7 +58,8 @@ impl Gui {
         });
 
         // We use the egui_wgpu_backend crate as the render backend.
-        let egui_rpass = RenderPass::new(&device, texture_format);
+        let msaa_samples = 4;
+        let egui_rpass = RenderPass::new(&device, texture_format, msaa_samples);
 
         // Display the demo application that ships with egui.
         let demo_app = egui_demo_lib::WrapApp::default();
@@ -97,6 +98,7 @@ impl Gui {
                 cpu_usage: *previous_frame_time,
                 seconds_since_midnight: Some(seconds_since_midnight()),
                 native_pixels_per_point: Some(window.scale_factor() as _),
+                prefer_dark_mode: None,
             },
             tex_allocator: &mut self.render_pass,
             output: &mut app_output,
