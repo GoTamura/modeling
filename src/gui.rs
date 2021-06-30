@@ -58,7 +58,7 @@ impl Gui {
         });
 
         // We use the egui_wgpu_backend crate as the render backend.
-        let msaa_samples = 4;
+        let msaa_samples = 1;
         let egui_rpass = RenderPass::new(&device, texture_format, msaa_samples);
 
         // Display the demo application that ships with egui.

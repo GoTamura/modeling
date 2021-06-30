@@ -148,10 +148,7 @@ impl State {
             //res_dir.join("sponza.obj"),
             res_dir.join("rungholt/rungholt.obj"),
             &sc_desc,
-            &scene.camera,
-            &scene.light,
-            &scene.renderer.uniforms,
-            &scene.renderer.texture_bind_group_layout,
+            &scene,
         );
 
         let model = model::Model::OBJ(model.await.unwrap());
@@ -161,10 +158,7 @@ impl State {
                 &queue,
                 res_dir.join("cube.obj"),
                 &sc_desc,
-                &scene.camera,
-                &scene.light,
-                &scene.renderer.uniforms,
-                &scene.renderer.texture_bind_group_layout,
+                &scene,
             )
             .await
             .unwrap(),

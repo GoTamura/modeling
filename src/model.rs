@@ -4,6 +4,7 @@ use crate::light;
 use crate::light::Light;
 use crate::renderer;
 use crate::renderer::Uniforms;
+use crate::scene::Scene;
 use crate::shader;
 use crate::texture;
 use anyhow::*;
@@ -104,10 +105,7 @@ impl ObjModel {
         queue: &wgpu::Queue,
         path: P,
         sc_desc: &wgpu::SwapChainDescriptor,
-        camera: &Camera,
-        light: &Light,
-        uniforms: &Uniforms,
-        layout: &wgpu::BindGroupLayout,
+        scene: &Scene,
     ) -> Result<Self> {
         let (obj_models, obj_materials) = tobj::load_obj(
             path.as_ref(),
@@ -182,9 +180,9 @@ impl ObjModel {
                 "obj vertex shader",
                 std::path::Path::new(env!("OUT_DIR")).join("shader"),
                 device,
-                &layout,
-                &light.bind_group_layout,
-                &uniforms.bind_group_layout,
+                    &scene.renderer.texture_bind_group_layout,
+                    &scene.light.bind_group_layout,
+                    &scene.renderer.uniforms.bind_group_layout,
                 &sc_desc.format,
             );
 
@@ -195,7 +193,7 @@ impl ObjModel {
                 normal_texture,
                 specular_texture,
                 i as u32,
-                &layout,
+                &scene.renderer.texture_bind_group_layout,
                 shader,
             ));
         }
@@ -210,7 +208,7 @@ impl ObjModel {
                         m.mesh.positions[i * 3 + 1],
                         m.mesh.positions[i * 3 + 2],
                     ],
-                    tex_coords: [m.mesh.texcoords[i * 2], 1.0 -  m.mesh.texcoords[i * 2 + 1]],
+                    tex_coords: [m.mesh.texcoords[i * 2], 1.0 - m.mesh.texcoords[i * 2 + 1]],
                     normal: [
                         m.mesh.normals[i * 3],
                         m.mesh.normals[i * 3 + 1],
