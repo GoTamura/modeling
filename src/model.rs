@@ -1,18 +1,10 @@
-use crate::camera::Camera;
-use crate::camera::Projection;
-use crate::light;
-use crate::light::Light;
-use crate::renderer;
-use crate::renderer::Uniforms;
 use crate::scene::Scene;
 use crate::shader;
 use crate::texture;
 use anyhow::*;
-use itertools::izip;
-use rayon::prelude::*;
 use std::ops::Range;
 use std::path::Path;
-use tokio::process;
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 pub trait Vertex {
@@ -79,18 +71,10 @@ impl Model {
             Model::GLTF(ref m) => &m.meshes,
         }
     }
-
-    pub fn materials(&self) -> &Vec<Material> {
-        match self {
-            Model::OBJ(m) => &m.materials,
-            Model::GLTF(m) => &m.materials,
-        }
-    }
 }
 #[derive(Debug)]
 pub struct ObjModel {
     pub meshes: Vec<Mesh>,
-    pub materials: Vec<Material>,
 }
 
 #[derive(Debug)]
@@ -118,6 +102,8 @@ impl ObjModel {
 
         // We're assuming that the texture files are stored with the obj file
         let containing_folder = path.as_ref().parent().context("Directory has no parent")?;
+
+        let mut material_keys = Vec::new();
 
         let mut materials = Vec::new();
         for (i, mat) in obj_materials.unwrap().into_iter().enumerate() {
@@ -176,26 +162,49 @@ impl ObjModel {
                 )
             };
 
-            let shader = shader::Shader::new(
-                "obj vertex shader",
-                std::path::Path::new(env!("OUT_DIR")).join("shader"),
-                device,
-                    &scene.renderer.texture_bind_group_layout,
-                    &scene.light.bind_group_layout,
-                    &scene.renderer.uniforms.bind_group_layout,
-                &sc_desc.format,
-            );
+            let shader_key = std::path::Path::new(env!("OUT_DIR"))
+                .join("shader")
+                .to_string_lossy()
+                .into_owned();
+            let shader = scene
+                .shaders
+                .write()
+                .unwrap()
+                .entry(shader_key)
+                .or_insert_with(|| {
+                    Arc::new(shader::Shader::new(
+                        "obj vertex shader",
+                        std::path::Path::new(env!("OUT_DIR")).join("shader"),
+                        device,
+                        &scene.renderer.texture_bind_group_layout,
+                        &scene.light.bind_group_layout,
+                        &scene.renderer.uniforms.bind_group_layout,
+                        &sc_desc.format,
+                    ))
+                })
+                .clone();
 
-            materials.push(Material::new(
-                device,
-                &mat.name,
-                diffuse_texture,
-                normal_texture,
-                specular_texture,
-                i as u32,
-                &scene.renderer.texture_bind_group_layout,
-                shader,
-            ));
+            let material_key = format!("{}-{}", &mat.name, i);
+            let material = scene
+                .materials
+                .write()
+                .unwrap()
+                .entry(material_key.clone())
+                .or_insert_with(|| {
+                    Arc::new(Material::new(
+                        device,
+                        &mat.name,
+                        diffuse_texture,
+                        normal_texture,
+                        specular_texture,
+                        i as u32,
+                        &scene.renderer.texture_bind_group_layout,
+                        shader,
+                    ))
+                })
+                .clone();
+            materials.push(material);
+            material_keys.push(material_key.clone());
         }
 
         let mut meshes = Vec::new();
@@ -269,11 +278,17 @@ impl ObjModel {
                 vertex_buffer,
                 index_buffer,
                 num_elements: m.mesh.indices.len() as u32,
-                material: m.mesh.material_id.unwrap_or(0) as u32,
+                material: scene
+                    .materials
+                    .read()
+                    .unwrap()
+                    .get(&material_keys[m.mesh.material_id.unwrap()])
+                    .unwrap()
+                    .clone(),
             });
         }
 
-        Ok(Self { meshes, materials })
+        Ok(Self { meshes })
     }
 
     //pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
@@ -427,7 +442,7 @@ pub struct Material {
     pub specular_texture: texture::Texture,
     pub id: u32,
     pub bind_group: wgpu::BindGroup,
-    pub shader: shader::Shader,
+    pub shader: Arc<shader::Shader>,
 }
 
 impl Material {
@@ -439,7 +454,7 @@ impl Material {
         specular_texture: texture::Texture,
         id: u32,
         layout: &wgpu::BindGroupLayout,
-        shader: shader::Shader,
+        shader: Arc<shader::Shader>,
     ) -> Self {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &layout,
@@ -490,7 +505,7 @@ pub struct Mesh {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
-    pub material: u32,
+    pub material: Arc<Material>,
 }
 
 pub trait DrawModel<'a, 'b>
@@ -580,11 +595,13 @@ where
         light: &'b wgpu::BindGroup,
     ) {
         for mesh in model.meshes() {
-            let material = &model
-                .materials()
-                .iter()
-                .find(|material| material.id == mesh.material);
-            self.draw_mesh_instanced(mesh, material, instances.clone(), uniforms, light);
+            self.draw_mesh_instanced(
+                mesh,
+                &Some(&mesh.material),
+                instances.clone(),
+                uniforms,
+                light,
+            );
         }
     }
 }

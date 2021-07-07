@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use wgpu::CommandEncoder;
 use winit::dpi::PhysicalSize;
@@ -6,11 +9,14 @@ use winit::dpi::PhysicalSize;
 use crate::{
     camera::{Camera, CameraController},
     light::{Light, LightRaw},
-    model::Model,
+    model::{Material, Model},
     renderer::{Renderer, RendererExt},
     shader::Shader,
     texture,
 };
+
+type Materials = Arc<RwLock<HashMap<String, Arc<Material>>>>;
+type Shaders = Arc<RwLock<HashMap<String, Arc<Shader>>>>;
 
 #[derive(Debug)]
 pub struct Scene {
@@ -18,6 +24,8 @@ pub struct Scene {
     pub light: Light,
     pub camera: Camera,
     pub renderer: Renderer,
+    pub materials: Materials,
+    pub shaders: Shaders,
 }
 
 impl Scene {
@@ -35,10 +43,13 @@ impl Scene {
             renderer: Renderer::new(device, sc_desc, &camera, &light),
             light,
             camera,
+            materials: Arc::new(RwLock::new(HashMap::new())),
+            shaders: Arc::new(RwLock::new(HashMap::new())),
         }
     }
     pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, frame_view: &wgpu::TextureView) {
-        self.renderer.draw(encoder, frame_view, &self.models, &self.light);
+        self.renderer
+            .draw(encoder, frame_view, &self.models, &self.light);
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor) {
