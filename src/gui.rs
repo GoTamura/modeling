@@ -3,7 +3,10 @@ use egui::FontDefinitions;
 use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::*;
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, RwLock},
+    time::{Duration, Instant},
+};
 pub enum Event {
     RequestRedraw,
 }
@@ -14,6 +17,8 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
+
+use crate::scene::Scene;
 
 fn seconds_since_midnight() -> f64 {
     let time = chrono::Local::now().time();
@@ -33,7 +38,8 @@ pub struct Gui {
     platform: Platform,
     render_pass: RenderPass,
     repaint_signal: std::sync::Arc<ExampleRepaintSignal>,
-    app: egui_demo_lib::WrapApp,
+    app: Box<dyn epi::App>,
+    // app: egui_demo_lib::WrapApp,
 }
 
 impl Gui {
@@ -43,6 +49,7 @@ impl Gui {
         texture_format: wgpu::TextureFormat,
         event_loop: &EventLoop<Event>,
         size: PhysicalSize<u32>,
+        scene: Arc<RwLock<Scene>>,
     ) -> Self {
         let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
             event_loop.create_proxy(),
@@ -62,13 +69,14 @@ impl Gui {
         let egui_rpass = RenderPass::new(&device, texture_format, msaa_samples);
 
         // Display the demo application that ships with egui.
-        let demo_app = egui_demo_lib::WrapApp::default();
+        // let demo_app = egui_demo_lib::WrapApp::default();
+        let demo_app = MyApp::new(scene);
 
         Gui {
             platform,
             render_pass: egui_rpass,
             repaint_signal,
-            app: demo_app,
+            app: Box::new(demo_app),
         }
     }
 
@@ -136,5 +144,67 @@ impl Gui {
 
     pub fn handle_event<T>(&mut self, event: &winit::event::Event<T>) {
         self.platform.handle_event(event);
+    }
+}
+
+struct MyApp {
+    scene: Arc<RwLock<Scene>>,
+    counter: u32,
+}
+
+impl MyApp {
+    fn new(scene: Arc<RwLock<Scene>>) -> Self {
+        Self { scene, counter: 0 }
+    }
+}
+
+impl epi::App for MyApp {
+    fn update(&mut self, ctx: &egui::CtxRef, frame: &mut Frame<'_>) {
+        egui::Window::new("wrap_app_top_bar")
+            .min_width(50.0)
+            .show(ctx, |ui| {
+                egui::trace!(ui);
+                ui.vertical(|ui| {
+                    if ui.button("Compile shader").clicked() {
+                        for shader in self.scene.write().unwrap().shaders.read().unwrap().iter() {
+                            //TODO shader.1.recompile()
+                        }
+                    }
+                    if ui.button("-").clicked() {
+                        self.counter -= 1;
+                    }
+                    ui.label(self.counter.to_string());
+                    if ui.button("+").clicked() {
+                        self.counter += 1;
+                    }
+                    let text_style = egui::TextStyle::Body;
+                    let row_height = ui.fonts()[text_style].row_height();
+                    // let row_height = ui.spacing().interact_size.y; // if you are adding buttons instead of labels.
+                    let num_rows = self.scene.read().unwrap().materials.read().unwrap().len();
+                    egui::ScrollArea::auto_sized().show_rows(
+                        ui,
+                        row_height,
+                        num_rows,
+                        |ui, row_range| {
+                            // for row in row_range {
+                                // let text = format!("Row {}/{}", row + 1, num_rows);
+                                // ui.label(text);
+                            // }
+                            for (i, material) in self.scene.read().unwrap().materials.read().unwrap().iter().enumerate() {
+                                if row_range.contains(&i) {
+                                    ui.label(material.0);
+                                }
+                            }
+                        },
+                    );
+                    for material in self.scene.read().unwrap().materials.read().unwrap().iter() {
+                        ui.label(material.0);
+                    }
+                });
+            });
+    }
+
+    fn name(&self) -> &str {
+        "MyApp"
     }
 }

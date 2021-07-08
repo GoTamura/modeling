@@ -8,7 +8,7 @@ use winit::{
 use wgpu::util::DeviceExt;
 
 use bytemuck::{Pod, Zeroable};
-use std::time::{Duration, Instant};
+use std::{sync::{Arc, RwLock}, time::{Duration, Instant}};
 
 use cgmath::prelude::*;
 
@@ -27,7 +27,7 @@ pub struct State {
     sc_desc: wgpu::SwapChainDescriptor,
     swap_chain: wgpu::SwapChain,
     size: winit::dpi::PhysicalSize<u32>,
-    scene: scene::Scene,
+    scene: Arc<RwLock<scene::Scene>>,
     camera_controller: camera::CameraController,
 
     pub gui: gui::Gui,
@@ -135,11 +135,11 @@ impl State {
         };
         let swap_chain = device.create_swap_chain(&surface, &sc_desc);
 
-        let gui = gui::Gui::new(&device, window, sc_desc.format, event_loop, size);
 
         let res_dir = std::path::Path::new(env!("OUT_DIR")).join("res");
         //let model = model::Model::GLTF(model.await.unwrap());
-        let mut scene = scene::Scene::new(&device, &sc_desc);
+        let mut scene = Arc::new(RwLock::new(scene::Scene::new(&device, &sc_desc)));
+        let gui = gui::Gui::new(&device, window, sc_desc.format, event_loop, size, scene.clone());
 
         let model = model::ObjModel::load(
             &device,
@@ -148,7 +148,7 @@ impl State {
             //res_dir.join("sponza.obj"),
             res_dir.join("rungholt/rungholt.obj"),
             &sc_desc,
-            &scene,
+            scene.clone(),
         );
 
         let model = model::Model::OBJ(model.await.unwrap());
@@ -158,13 +158,13 @@ impl State {
                 &queue,
                 res_dir.join("cube.obj"),
                 &sc_desc,
-                &scene,
+                scene.clone(),
             )
             .await
             .unwrap(),
         );
-        scene.models.push(model);
-        scene.models.push(light_model);
+        scene.write().unwrap().models.push(model);
+        scene.write().unwrap().models.push(light_model);
 
         let camera_controller = CameraController::new(0.2, size);
 
@@ -186,7 +186,7 @@ impl State {
         self.sc_desc.width = new_size.width;
         self.sc_desc.height = new_size.height;
         self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
-        self.scene.resize(&self.device, &self.sc_desc);
+        self.scene.write().unwrap().resize(&self.device, &self.sc_desc);
         self.camera_controller.size = self.size;
     }
 
@@ -195,8 +195,8 @@ impl State {
     }
 
     fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.scene.camera);
-        self.scene.update(&self.queue);
+        self.camera_controller.update_camera(&mut self.scene.write().unwrap().camera);
+        self.scene.write().unwrap().update(&self.queue);
     }
 
     fn render(
@@ -216,7 +216,7 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
-        self.scene.draw(&mut encoder, &frame.view);
+        self.scene.read().unwrap().draw(&mut encoder, &frame.view);
 
         self.gui.draw(
             &self.device,

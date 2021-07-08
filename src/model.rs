@@ -5,6 +5,7 @@ use anyhow::*;
 use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::RwLock;
 use wgpu::util::DeviceExt;
 
 pub trait Vertex {
@@ -89,8 +90,9 @@ impl ObjModel {
         queue: &wgpu::Queue,
         path: P,
         sc_desc: &wgpu::SwapChainDescriptor,
-        scene: &Scene,
+        scene: Arc<RwLock<Scene>>,
     ) -> Result<Self> {
+        let scene = scene.read().unwrap();
         let (obj_models, obj_materials) = tobj::load_obj(
             path.as_ref(),
             &tobj::LoadOptions {
