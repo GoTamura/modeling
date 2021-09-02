@@ -24,8 +24,7 @@ pub struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    sc_desc: wgpu::SwapChainDescriptor,
-    swap_chain: wgpu::SwapChain,
+    config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     scene: Arc<RwLock<scene::Scene>>,
     camera_controller: camera::CameraController,
@@ -104,9 +103,13 @@ impl State {
         texture_format: wgpu::TextureFormat,
         event_loop: &EventLoop<gui::Event>,
     ) -> Self {
-        let size = window.inner_size();
-        let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
-        let surface = unsafe { instance.create_surface(window) };
+        let backend = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
+        let instance = wgpu::Instance::new(backend);
+        let (size, surface) = unsafe { 
+            let size = window.inner_size();
+            let surface = instance.create_surface(window);
+            (size, surface)
+        };
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -125,21 +128,21 @@ impl State {
             )
             .await
             .expect("Unable to find a suitable GPU adapter!");
-        let sc_desc = wgpu::SwapChainDescriptor {
-            usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             //format: texture_format,
-            format: adapter.get_swap_chain_preferred_format(&surface).unwrap(),
+            format: surface.get_preferred_format(&adapter).unwrap(),
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
         };
-        let swap_chain = device.create_swap_chain(&surface, &sc_desc);
+        surface.configure(&device, &config);
 
 
         let res_dir = std::path::Path::new(env!("OUT_DIR")).join("res");
         //let model = model::Model::GLTF(model.await.unwrap());
-        let mut scene = Arc::new(RwLock::new(scene::Scene::new(&device, &sc_desc)));
-        let gui = gui::Gui::new(&device, window, sc_desc.format, event_loop, size, scene.clone());
+        let mut scene = Arc::new(RwLock::new(scene::Scene::new(&device, &config)));
+        let gui = gui::Gui::new(&device, window, config.format, event_loop, size, scene.clone());
 
         let model = model::ObjModel::load(
             &device,
@@ -147,7 +150,7 @@ impl State {
             //res_dir.join("breakfast_room.obj"),
             //res_dir.join("sponza.obj"),
             res_dir.join("rungholt/rungholt.obj"),
-            &sc_desc,
+            &config,
             scene.clone(),
         );
 
@@ -157,7 +160,7 @@ impl State {
                 &device,
                 &queue,
                 res_dir.join("cube.obj"),
-                &sc_desc,
+                &config,
                 scene.clone(),
             )
             .await
@@ -172,8 +175,7 @@ impl State {
             surface,
             device,
             queue,
-            sc_desc,
-            swap_chain,
+            config,
             size,
             scene,
             camera_controller,
@@ -183,10 +185,10 @@ impl State {
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         self.size = new_size;
-        self.sc_desc.width = new_size.width;
-        self.sc_desc.height = new_size.height;
-        self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
-        self.scene.write().unwrap().resize(&self.device, &self.sc_desc);
+        self.config.width = new_size.width;
+        self.config.height = new_size.height;
+        self.surface.configure(&self.device, &self.config);
+        self.scene.write().unwrap().resize(&self.device, &self.config);
         self.camera_controller.size = self.size;
     }
 
@@ -206,28 +208,31 @@ impl State {
         window: &Window,
     ) {
         let frame = self
-            .swap_chain
+            .surface
             .get_current_frame()
-            .expect("Timeout getting texture")
-            .output;
+            .expect("Timeout getting texture");
+        let view = frame
+            .output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
 
-        self.scene.read().unwrap().draw(&mut encoder, &frame.view);
+        self.scene.read().unwrap().draw(&mut encoder, &view);
 
         self.gui.draw(
             &self.device,
             &self.queue,
             &mut encoder,
-            &frame.view,
+            &view,
             start_time,
             previous_frame_time,
             window,
-            self.sc_desc.width,
-            self.sc_desc.height,
+            self.config.width,
+            self.config.height,
         );
 
         // submit will accept anything that implements IntoIter

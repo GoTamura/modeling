@@ -1,13 +1,10 @@
+use std::mem;
+
 use bytemuck::{Pod, Zeroable};
 use cgmath::SquareMatrix;
 use wgpu::util::DeviceExt;
 
-use crate::{
-    camera::{self, Camera, Projection},
-    light::Light,
-    model::{self, Material, Model, Vertex},
-    texture,
-};
+use crate::{camera::{self, Camera, Projection}, light::{Light, LightObject, LightRaw, Lights}, model::{self, Material, Model, Vertex}, texture};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
@@ -25,6 +22,7 @@ impl UniformsRaw {
     }
 
     fn update_view_proj(&mut self, camera: &Camera) {
+        use crate::camera::PerspectiveFovExt;
         self.view_position = camera.eye.to_homogeneous().into();
         self.view_proj = (camera.projection.calc_matrix() * camera.calc_matrix()).into();
     }
@@ -47,13 +45,13 @@ impl Uniforms {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
             contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStage::VERTEX | wgpu::ShaderStage::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -95,9 +93,9 @@ pub struct Renderer {
 impl Renderer {
     pub fn new(
         device: &wgpu::Device,
-        sc_desc: &wgpu::SwapChainDescriptor,
+        config: &wgpu::SurfaceConfiguration,
         camera: &Camera,
-        light: &Light,
+        light: &LightObject,
     ) -> Self {
         let uniforms = Uniforms::new(device, camera);
 
@@ -106,7 +104,7 @@ impl Renderer {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStage::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
                             view_dimension: wgpu::TextureViewDimension::D2,
@@ -116,7 +114,7 @@ impl Renderer {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
-                        visibility: wgpu::ShaderStage::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler {
                             comparison: false,
                             filtering: true,
@@ -125,7 +123,7 @@ impl Renderer {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
-                        visibility: wgpu::ShaderStage::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
                             view_dimension: wgpu::TextureViewDimension::D2,
@@ -135,7 +133,7 @@ impl Renderer {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 3,
-                        visibility: wgpu::ShaderStage::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler {
                             comparison: false,
                             filtering: true,
@@ -144,7 +142,7 @@ impl Renderer {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 4,
-                        visibility: wgpu::ShaderStage::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
                             view_dimension: wgpu::TextureViewDimension::D2,
@@ -154,7 +152,7 @@ impl Renderer {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 5,
-                        visibility: wgpu::ShaderStage::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler {
                             comparison: false,
                             filtering: true,
@@ -166,7 +164,7 @@ impl Renderer {
             });
 
         let depth_texture =
-            texture::Texture::create_depth_texture(&device, &sc_desc, "depth_texture");
+            texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
         Self {
             uniforms,
@@ -186,7 +184,7 @@ pub trait RendererExt {
         encoder: &mut wgpu::CommandEncoder,
         frame_view: &wgpu::TextureView,
         model: &Vec<Model>,
-        light: &Light,
+        light: &Lights,
     );
 }
 
@@ -196,37 +194,37 @@ impl RendererExt for Renderer {
         encoder: &mut wgpu::CommandEncoder,
         frame_view: &wgpu::TextureView,
         models: &Vec<Model>,
-        light: &Light,
+        lights: &Lights,
     ) {
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[wgpu::RenderPassColorAttachment {
-                view: frame_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    // load: wgpu::LoadOp::Load,
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.1,
-                        g: 0.2,
-                        b: 0.3,
-                        a: 1.0,
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[wgpu::RenderPassColorAttachment {
+                    view: frame_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.2,
+                            b: 0.3,
+                            a: 1.0,
+                        }),
+                        store: true,
+                    },
+                }],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: true,
                     }),
-                    store: true,
-                },
-            }],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth_texture.view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: true,
+                    stencil_ops: None,
                 }),
-                stencil_ops: None,
-            }),
-        });
+            });
 
-        for model in models {
-            use model::DrawModel;
-            render_pass.draw_model(model, &self.uniforms.bind_group, &light.bind_group);
-        }
+            for model in models {
+                use model::DrawModel;
+                render_pass.draw_model(model, &self.uniforms.bind_group, &lights.lights[0].bind_group);
+            }
     }
 }

@@ -1,6 +1,6 @@
 use std::{fs::File, io::Read, path::Path, path::PathBuf};
 
-use crate::{model::{self, Vertex}, texture};
+use crate::{model::{self, ModelVertex, Vertex}, texture};
 
 #[derive(Debug)]
 pub struct Shader {
@@ -9,6 +9,32 @@ pub struct Shader {
     modules: Vec<wgpu::ShaderModule>,
     pub render_pipeline: wgpu::RenderPipeline,
 }
+
+pub trait Pass {
+    fn pipeline(&self) -> &wgpu::RenderPipeline;
+    fn bind_group(&self) -> &wgpu::BindGroup;
+    fn uniform_buf(&self) -> &wgpu::Buffer;
+}
+pub struct ShadowPass {
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    uniform_buf: wgpu::Buffer,
+}
+
+impl Pass for ShadowPass {
+    fn pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.pipeline
+    }
+
+    fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
+    }
+
+    fn uniform_buf(&self) -> &wgpu::Buffer {
+        &self.uniform_buf
+    }
+}
+
 
 impl Shader {
     pub fn new(
@@ -48,7 +74,7 @@ impl Shader {
                 &fs_module,
             )
         };
-        
+
         let modules = vec![vs_module, fs_module];
 
         Self {
@@ -66,7 +92,6 @@ impl Shader {
         let shader = wgpu::ShaderModuleDescriptor {
             label: Some(label),
             source: wgpu::util::make_spirv(&buffer),
-            flags: wgpu::ShaderFlags::VALIDATION,
         };
         // let shader = wgpu::ShaderModuleDescriptor {
         // label: Some(label),
@@ -100,7 +125,7 @@ impl Shader {
                 targets: &[wgpu::ColorTargetState {
                     format: color_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrite::ALL,
+                    write_mask: wgpu::ColorWrites::ALL,
                 }],
             }),
 
@@ -156,7 +181,7 @@ impl Shader {
                 targets: &[wgpu::ColorTargetState {
                     format: color_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrite::ALL,
+                    write_mask: wgpu::ColorWrites::ALL,
                 }],
             }),
 

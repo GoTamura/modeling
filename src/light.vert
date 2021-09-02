@@ -12,16 +12,17 @@ uniform Uniforms {
 
 layout(set=1, binding=0)
 uniform Light {
-    vec3 u_position;
-    vec3 u_color;
+    mat4 light_projection;
+    vec4 u_position;
+    vec4 u_color;
 };
 
 // Let's keep our light smaller than our other objects
 float scale = 0.25;
 
 void main() {
-    vec3 v_position = a_position * scale + u_position;
+    vec3 v_position = a_position * scale + u_position.xyz;
     gl_Position = u_view_proj * vec4(v_position, 1);
 
-    v_color = u_color;
+    v_color = u_color.rgb;
 }

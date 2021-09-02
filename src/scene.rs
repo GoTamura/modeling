@@ -6,14 +6,7 @@ use std::{
 use wgpu::CommandEncoder;
 use winit::dpi::PhysicalSize;
 
-use crate::{
-    camera::{Camera, CameraController},
-    light::{Light, LightRaw},
-    model::{Material, Model},
-    renderer::{Renderer, RendererExt},
-    shader::Shader,
-    texture,
-};
+use crate::{camera::{Camera, CameraController}, light::{Light, LightObject, LightRaw, Lights}, model::{Material, Model}, renderer::{Renderer, RendererExt}, shader::Shader, texture};
 
 type Materials = Arc<RwLock<HashMap<String, Arc<Material>>>>;
 type Shaders = Arc<RwLock<HashMap<String, Arc<Shader>>>>;
@@ -21,7 +14,7 @@ type Shaders = Arc<RwLock<HashMap<String, Arc<Shader>>>>;
 #[derive(Debug)]
 pub struct Scene {
     pub models: Vec<Model>,
-    pub light: Light,
+    pub lights: Lights,
     pub camera: Camera,
     pub renderer: Renderer,
     pub materials: Materials,
@@ -29,19 +22,21 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn new(device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor) -> Self {
-        let light_raw = LightRaw {
-            position: [200.0, 200.0, 2.0],
-            _padding: 0,
-            color: [1.0, 1.0, 1.0],
-        };
-        let light = Light::new(&device, light_raw);
-        let size = PhysicalSize::<u32>::new(sc_desc.width, sc_desc.height);
+    pub fn new(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
+        let light = Light::new(
+            cgmath::Point3::new(200.0, 200.0, 2.0),
+            cgmath::Vector3::new(1., 1., 1.),
+            cgmath::Deg(45.),
+            1.0..20.0,
+        );
+        let lights = Lights::new(device, vec!(LightObject::new(&device, light)));
+
+        let size = PhysicalSize::<u32>::new(config.width, config.height);
         let camera = Camera::new(size);
         Self {
             models: Vec::new(),
-            renderer: Renderer::new(device, sc_desc, &camera, &light),
-            light,
+            renderer: Renderer::new(device, config, &camera, &lights.lights[0]),
+            lights,
             camera,
             materials: Arc::new(RwLock::new(HashMap::new())),
             shaders: Arc::new(RwLock::new(HashMap::new())),
@@ -49,17 +44,18 @@ impl Scene {
     }
     pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, frame_view: &wgpu::TextureView) {
         self.renderer
-            .draw(encoder, frame_view, &self.models, &self.light);
+            .draw(encoder, frame_view, &self.models, &self.lights);
     }
 
-    pub fn resize(&mut self, device: &wgpu::Device, sc_desc: &wgpu::SwapChainDescriptor) {
-        self.camera.projection.resize(sc_desc.width, sc_desc.height);
+    pub fn resize(&mut self, device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) {
+        use crate::camera::PerspectiveFovExt;
+        self.camera.projection.resize(config.width, config.height);
         self.renderer.depth_texture =
-            texture::Texture::create_depth_texture(device, sc_desc, "depth_texture");
+            texture::Texture::create_depth_texture(device, config, "depth_texture");
     }
 
     pub fn update(&mut self, queue: &wgpu::Queue) {
-        self.light.update(queue);
+        self.lights.lights[0].update(queue);
         self.renderer.update(queue, &self.camera);
     }
 }

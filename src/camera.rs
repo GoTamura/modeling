@@ -10,6 +10,43 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
+pub trait PerspectiveFovExt {
+    fn resize(&mut self, width: u32, height: u32);
+    fn calc_matrix(&self) -> cgmath::Matrix4<f32>;
+    fn new<F: Into<cgmath::Rad<f32>>>(
+        width: u32,
+        height: u32,
+        fovy: F,
+        near: f32,
+        far: f32,
+    ) -> Self;
+}
+
+impl PerspectiveFovExt for  cgmath::PerspectiveFov<f32> {
+    fn resize(&mut self, width: u32, height: u32) {
+        self.aspect = width as f32 / height as f32;
+    }
+
+    fn calc_matrix(&self) -> cgmath::Matrix4<f32> {
+        OPENGL_TO_WGPU_MATRIX * cgmath::Matrix4::from(self.to_perspective())
+    }
+
+    fn new<F: Into<cgmath::Rad<f32>>>(
+        width: u32,
+        height: u32,
+        fovy: F,
+        near: f32,
+        far: f32,
+    ) -> Self {
+        Self {
+            aspect: width as f32 / height as f32,
+            fovy: fovy.into(),
+            near,
+            far,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Projection {
     pub aspect: f32,
@@ -48,7 +85,7 @@ pub struct Camera {
     pub eye: cgmath::Point3<f32>,
     pub target: cgmath::Point3<f32>,
     pub up: cgmath::Vector3<f32>,
-    pub projection: Projection,
+    pub projection: cgmath::PerspectiveFov<f32>,
 }
 
 impl Camera {
@@ -56,7 +93,7 @@ impl Camera {
         cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up)
     }
     pub fn new(size: PhysicalSize<u32>) -> Self {
-        let projection = Projection::new(size.width, size.height, cgmath::Deg(45.0), 0.1, 100000.0);
+        let projection = cgmath::PerspectiveFov::new(size.width, size.height, cgmath::Deg(45.0), 0.1, 100000.0);
 
         Self {
             eye: (3.0, 4.0, -6.0).into(),
