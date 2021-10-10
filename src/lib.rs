@@ -7,3 +7,4 @@ pub mod scene;
 pub mod shader;
 pub mod state;
 pub mod texture;
+pub mod collection;

@@ -216,6 +216,36 @@ impl Texture {
         let img = image::open(path)?;
         Self::from_image(device, queue, &img, label, is_normal_map)
     }
+
+    pub fn load_house<P: AsRef<Path>>(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        path: P,
+        is_normal_map: bool,
+    ) -> Result<Self> {
+        let alpha_bytes = include_bytes!("model/rungholt/house-Alpha.png");
+        let rgb_bytes = include_bytes!("model/rungholt/house-RGB.png");
+        let rgba_bytes = include_bytes!("model/rungholt/house-RGBA.png");
+
+        let path_copy = path.as_ref().to_path_buf();
+        let label = path_copy.to_str();
+
+
+        let img = match path_copy.file_name().unwrap().to_str().unwrap() {
+            "house-Alpha.png" => {
+                image::load_from_memory_with_format(alpha_bytes, image::ImageFormat::Png)?
+            }
+            "house-RGB.png" => {
+                image::load_from_memory_with_format(rgb_bytes, image::ImageFormat::Png)?
+            }
+            "house-RGBA.png" => {
+                image::load_from_memory_with_format(rgba_bytes, image::ImageFormat::Png)?
+            }
+            _ => unreachable!(),
+        };
+        Self::from_image(device, queue, &img, label, is_normal_map)
+    }
+
     pub fn load_gltf(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

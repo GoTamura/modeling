@@ -196,6 +196,67 @@ impl RendererExt for Renderer {
         models: &Vec<Model>,
         lights: &Lights,
     ) {
+//        let light_uniform_size =
+//            (2 * mem::size_of::<LightRaw>()) as wgpu::BufferAddress;
+//        let light_storage_buf = device.create_buffer(&wgpu::BufferDescriptor {
+//            label: None,
+//            size: light_uniform_size,
+//            usage: wgpu::BufferUsages::STORAGE
+//                | wgpu::BufferUsages::COPY_SRC
+//                | wgpu::BufferUsages::COPY_DST,
+//            mapped_at_creation: false,
+//        });
+//
+//        // shadow pass
+//        encoder.push_debug_group("shadow passes");
+//        for (i, light) in lights.lights.iter().enumerate() {
+//            encoder.push_debug_group(&format!(
+//                "shadow pass {} (light at position {:?})",
+//                i, light.light.position
+//            ));
+//
+//            // The light uniform buffer already has the projection,
+//            // let's just copy it over to the shadow uniform buffer.
+//            encoder.copy_buffer_to_buffer(
+//                &lights.light_storage_buf,
+//                (i * mem::size_of::<LightRaw>()) as wgpu::BufferAddress,
+//                &self.shadow_pass.uniform_buf,
+//                0,
+//                64,
+//            );
+//
+//            encoder.insert_debug_marker("render entities");
+//            {
+//                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+//                    label: None,
+//                    color_attachments: &[],
+//                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+//                        view: &light.light.shadow_view.unwrap(),
+//                        depth_ops: Some(wgpu::Operations {
+//                            load: wgpu::LoadOp::Clear(1.0),
+//                            store: true,
+//                        }),
+//                        stencil_ops: None,
+//                    }),
+//                });
+//                pass.set_pipeline(&self.shadow_pass.pipeline);
+//                pass.set_bind_group(0, &self.shadow_pass.bind_group, &[]);
+//
+//                for entity in &self.entities {
+//                    pass.set_bind_group(1, &self.entity_bind_group, &[entity.uniform_offset]);
+//                    pass.set_index_buffer(entity.index_buf.slice(..), entity.index_format);
+//                    pass.set_vertex_buffer(0, entity.vertex_buf.slice(..));
+//                    pass.draw_indexed(0..entity.index_count as u32, 0, 0..1);
+//                }
+//            }
+//
+//            encoder.pop_debug_group();
+//        }
+//        encoder.pop_debug_group();
+//
+//        // forward pass
+//        encoder.push_debug_group("forward rendering pass");
+//        {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
                 color_attachments: &[wgpu::RenderPassColorAttachment {
@@ -226,5 +287,7 @@ impl RendererExt for Renderer {
                 use model::DrawModel;
                 render_pass.draw_model(model, &self.uniforms.bind_group, &lights.lights[0].bind_group);
             }
+       // }
+       // encoder.pop_debug_group();
     }
 }

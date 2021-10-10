@@ -59,7 +59,7 @@ fn main() -> Result<()> {
     let mut compiler = shaderc::Compiler::new().context("Unable to create shader compiler")?;
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_include_callback(
-        |name, include_type, source_name, depth| match include_type {
+        |name, include_type, source_name, _depth| match include_type {
             shaderc::IncludeType::Relative => {
                 let path = std::path::Path::new(source_name);
                 Ok(shaderc::ResolvedInclude {
@@ -107,6 +107,6 @@ fn main() -> Result<()> {
     let mut paths_to_copy = Vec::new();
     paths_to_copy.push("res/");
     copy_items(&paths_to_copy, out_dir, &copy_options)?;
-
+    
     Ok(())
 }

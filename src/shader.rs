@@ -1,6 +1,9 @@
 use std::{fs::File, io::Read, path::Path, path::PathBuf};
 
-use crate::{model::{self, ModelVertex, Vertex}, texture};
+use crate::{
+    model::{self, ModelVertex, Vertex},
+    texture,
+};
 
 #[derive(Debug)]
 pub struct Shader {
@@ -15,6 +18,146 @@ pub trait Pass {
     fn bind_group(&self) -> &wgpu::BindGroup;
     fn uniform_buf(&self) -> &wgpu::Buffer;
 }
+
+pub struct ForwardPass {
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    uniform_buf: wgpu::Buffer,
+}
+
+impl Pass for ForwardPass {
+    fn pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.pipeline
+    }
+
+    fn bind_group(&self) -> &wgpu::BindGroup {
+        &self.bind_group
+    }
+
+    fn uniform_buf(&self) -> &wgpu::Buffer {
+        &self.uniform_buf
+    }
+}
+
+impl ForwardPass {
+        const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    pub fn new(device: &wgpu::Device, shader: &wgpu::ShaderModule) -> Self {
+        let uniform_size = std::mem::size_of_val(shader) as wgpu::BufferAddress;
+        // Create pipeline layout
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0, // global
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(uniform_size),
+                },
+                count: None,
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("shadow"),
+            // bind_group_layouts: &[&bind_group_layout, &local_bind_group_layout],
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: uniform_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Create bind group
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buf.as_entire_binding(),
+            }],
+            label: None,
+        });
+
+        // Create the render pipeline
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shadow"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_bake",
+                buffers: &[ModelVertex::desc()],
+            },
+            fragment: None,
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::SHADOW_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2, // corresponds to bilinear filtering
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+        });
+
+        Self {
+            pipeline,
+            bind_group,
+            uniform_buf,
+        }
+    }
+
+    fn render_pass<'a>(
+        &'a self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        target_view: &'a wgpu::TextureView,
+        view: &'a wgpu::TextureView,
+        depth_view: &'a wgpu::TextureView,
+    ) -> wgpu::RenderPass<'a> {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    // load: wgpu::LoadOp::Load,
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.1,
+                        g: 0.2,
+                        b: 0.3,
+                        a: 1.0,
+                    }),
+                    store: true,
+                },
+            }],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: true,
+                }),
+                stencil_ops: None,
+            }),
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+
+        pass
+    }
+}
+
 pub struct ShadowPass {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -35,6 +178,104 @@ impl Pass for ShadowPass {
     }
 }
 
+//impl ShadowPass {
+//    const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+//
+//    fn render_pass<'a>(
+//        encoder: &'a wgpu::CommandEncoder,
+//        target_view: &'a wgpu::TextureView,
+//    ) -> wgpu::RenderPass<'a> {
+//        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+//            label: None,
+//            color_attachments: &[],
+//            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+//                view: target_view,
+//                depth_ops: Some(wgpu::Operations {
+//                    load: wgpu::LoadOp::Clear(1.0),
+//                    store: true,
+//                }),
+//                stencil_ops: None,
+//            }),
+//        })
+//    }
+//
+//    pub fn new(device: &wgpu::Device, shader: &Shader) -> Self {
+//        let uniform_size = std::mem::size_of_val(shader) as wgpu::BufferAddress;
+//        // Create pipeline layout
+//        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+//            label: None,
+//            entries: &[wgpu::BindGroupLayoutEntry {
+//                binding: 0, // global
+//                visibility: wgpu::ShaderStages::VERTEX,
+//                ty: wgpu::BindingType::Buffer {
+//                    ty: wgpu::BufferBindingType::Uniform,
+//                    has_dynamic_offset: false,
+//                    min_binding_size: wgpu::BufferSize::new(uniform_size),
+//                },
+//                count: None,
+//            }],
+//        });
+//        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+//            label: Some("shadow"),
+//            bind_group_layouts: &[&bind_group_layout, &local_bind_group_layout],
+//            push_constant_ranges: &[],
+//        });
+//
+//        let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+//            label: None,
+//            size: uniform_size,
+//            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+//            mapped_at_creation: false,
+//        });
+//
+//        // Create bind group
+//        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+//            layout: &bind_group_layout,
+//            entries: &[wgpu::BindGroupEntry {
+//                binding: 0,
+//                resource: uniform_buf.as_entire_binding(),
+//            }],
+//            label: None,
+//        });
+//
+//        // Create the render pipeline
+//        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+//            label: Some("shadow"),
+//            layout: Some(&pipeline_layout),
+//            vertex: wgpu::VertexState {
+//                module: &shader,
+//                entry_point: "vs_bake",
+//                buffers: &[ModelVertex::desc()],
+//            },
+//            fragment: None,
+//            primitive: wgpu::PrimitiveState {
+//                topology: wgpu::PrimitiveTopology::TriangleList,
+//                front_face: wgpu::FrontFace::Ccw,
+//                cull_mode: Some(wgpu::Face::Back),
+//                clamp_depth: device.features().contains(wgpu::Features::DEPTH_CLAMPING),
+//                ..Default::default()
+//            },
+//            depth_stencil: Some(wgpu::DepthStencilState {
+//                format: Self::SHADOW_FORMAT,
+//                depth_write_enabled: true,
+//                depth_compare: wgpu::CompareFunction::LessEqual,
+//                stencil: wgpu::StencilState::default(),
+//                bias: wgpu::DepthBiasState {
+//                    constant: 2, // corresponds to bilinear filtering
+//                    slope_scale: 2.0,
+//                    clamp: 0.0,
+//                },
+//            }),
+//            multisample: wgpu::MultisampleState::default(),
+//        });
+//
+//        Self {
+//            pipeline,
+//            bind_group,
+//            uniform_buf,
+//        }
+//    }
+//}
 
 impl Shader {
     pub fn new(
@@ -54,6 +295,53 @@ impl Shader {
         frag_name.set_extension("frag.spv");
         let vs_module = Self::compile_shader(&label, &vert_name, device);
         let fs_module = Self::compile_shader(&label, &frag_name, device);
+        let render_pipeline = {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    texture_bind_group_layout,
+                    light_bind_group_layout,
+                    uniforms_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+            Self::create_render_pipeline2(
+                &device,
+                &layout,
+                *texture_format,
+                Some(texture::Texture::DEPTH_FORMAT),
+                &[model::ModelVertex::desc()],
+                &vs_module,
+                &fs_module,
+            )
+        };
+
+        let modules = vec![vs_module, fs_module];
+
+        Self {
+            label,
+            filename,
+            modules,
+            render_pipeline,
+        }
+    }
+
+    pub fn default(
+        label: impl Into<String>,
+        filename: impl Into<PathBuf>,
+        device: &wgpu::Device,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+        light_bind_group_layout: &wgpu::BindGroupLayout,
+        uniforms_bind_group_layout: &wgpu::BindGroupLayout,
+        texture_format: &wgpu::TextureFormat,
+    ) -> Self {
+        let label = label.into();
+        let filename = filename.into();
+
+        let shader = wgpu::include_spirv!("shader.vert.spv");
+        let vs_module = device.create_shader_module(&shader);
+        let shader = wgpu::include_spirv!("shader.frag.spv");
+        let fs_module = device.create_shader_module(&shader);
         let render_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),

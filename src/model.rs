@@ -1,3 +1,4 @@
+use crate::collection::Rungholt;
 use crate::scene::Scene;
 use crate::shader;
 use crate::texture;
@@ -63,6 +64,7 @@ impl Vertex for ModelVertex {
 pub enum Model {
     OBJ(ObjModel),
     GLTF(GltfModel),
+    HOUSE(House),
 }
 
 impl Model {
@@ -70,6 +72,7 @@ impl Model {
         match self {
             Model::OBJ(ref m) => &m.meshes,
             Model::GLTF(ref m) => &m.meshes,
+            Model::HOUSE(ref m) => &m.meshes,
         }
     }
 }
@@ -688,4 +691,234 @@ where
             self.draw_light_mesh_instanced(mesh, instances.clone(), uniforms, light);
         }
     }
+}
+
+
+#[derive(Debug)]
+pub struct House {
+    pub meshes: Vec<Mesh>,
+}
+
+impl House {
+    pub async fn load<P: AsRef<Path>>(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        path: P,
+        config: &wgpu::SurfaceConfiguration,
+        scene: Arc<RwLock<Scene>>,
+    ) -> Result<Self> {
+        let scene = scene.read().unwrap();
+        let obj_bytes = include_bytes!("model/rungholt/house.obj");
+        let mut obj_file = std::io::BufReader::new(&obj_bytes[..]);
+
+        let (obj_models, obj_materials) = tobj::load_obj_buf(
+            &mut obj_file,
+            &tobj::LoadOptions {
+                triangulate: true,
+                single_index: true,
+                ..Default::default()
+            },
+            |p| match p.file_name().unwrap().to_str().unwrap() {
+                "house.mtl" => {
+                    let mtl_bytes = include_bytes!("model/rungholt/house.mtl");
+                    tobj::load_mtl_buf(&mut std::io::BufReader::new(&mtl_bytes[..]))
+                }
+                _ => unreachable!(),
+            },
+        )?;
+
+        // We're assuming that the texture files are stored with the obj file
+        let containing_folder = path.as_ref().parent().context("Directory has no parent")?;
+
+        let mut material_keys = Vec::new();
+
+        let mut materials = Vec::new();
+        for (i, mat) in obj_materials.unwrap().into_iter().enumerate() {
+            let diffuse_path = &mat.diffuse_texture;
+            let diffuse_texture = if !diffuse_path.is_empty(){
+                texture::Texture::load_house(device, queue, containing_folder.join(diffuse_path), false)
+                    .with_context(|| format!("Diffuse texture: {} not found", diffuse_path))?
+                // .unwrap_or_else(|_| panic!("Diffuse texture: {} not found", diffuse_path))
+            } else {
+                let mut diffuse_color = mat
+                    .diffuse
+                    .iter()
+                    .map(|i| (i * 255.) as u8)
+                    .collect::<Vec<u8>>();
+                diffuse_color.push(0xff);
+                texture::Texture::one_pixel(
+                    device,
+                    queue,
+                    &diffuse_color,
+                    Some("diffuse texture"),
+                    true,
+                )
+            };
+
+            let normal_path = &mat.normal_texture;
+            let normal_texture = if !normal_path.is_empty() {
+                texture::Texture::load(device, queue, containing_folder.join(normal_path), true)
+                    .with_context(|| format!("Normal texture: {} not found", normal_path))?
+            } else {
+                texture::Texture::one_pixel(
+                    device,
+                    queue,
+                    &[0x80, 0x80, 0xff, 0],
+                    Some("default normal texture"),
+                    true,
+                )
+            };
+
+            let specular_path = &mat.specular_texture;
+            let specular_texture = if !specular_path.is_empty() {
+                texture::Texture::load(device, queue, containing_folder.join(specular_path), false)
+                    .with_context(|| format!("Diffuse texture: {} not found", specular_path))?
+            } else {
+                let mut specular_color = mat
+                    .specular
+                    .iter()
+                    .map(|i| (i * 255.) as u8)
+                    .collect::<Vec<u8>>();
+                specular_color.push(0xff);
+                texture::Texture::one_pixel(
+                    device,
+                    queue,
+                    &specular_color,
+                    Some("specular texture"),
+                    true,
+                )
+            };
+
+            let shader_key = std::path::Path::new(env!("OUT_DIR"))
+                .join("shader")
+                .to_string_lossy()
+                .into_owned();
+            let shader = scene
+                .shaders
+                .write()
+                .unwrap()
+                .entry(shader_key)
+                .or_insert_with(|| {
+                    Arc::new(shader::Shader::default(
+                        "obj vertex shader",
+                        std::path::Path::new(env!("OUT_DIR")).join("shader"),
+                        device,
+                        &scene.renderer.texture_bind_group_layout,
+                        &scene.lights.lights[0].bind_group_layout,
+                        &scene.renderer.uniforms.bind_group_layout,
+                        &config.format,
+                    ))
+                })
+                .clone();
+
+            let material_key = format!("{}-{}", &mat.name, i);
+            let material = scene
+                .materials
+                .write()
+                .unwrap()
+                .entry(material_key.clone())
+                .or_insert_with(|| {
+                    Arc::new(Material::new(
+                        device,
+                        &mat.name,
+                        diffuse_texture,
+                        normal_texture,
+                        specular_texture,
+                        i as u32,
+                        &scene.renderer.texture_bind_group_layout,
+                        shader,
+                    ))
+                })
+                .clone();
+            materials.push(material);
+            material_keys.push(material_key.clone());
+        }
+
+        let mut meshes = Vec::new();
+        for m in obj_models {
+            let mut vertices = Vec::new();
+            for i in 0..m.mesh.positions.len() / 3 {
+                vertices.push(ModelVertex {
+                    position: [
+                        m.mesh.positions[i * 3],
+                        m.mesh.positions[i * 3 + 1],
+                        m.mesh.positions[i * 3 + 2],
+                    ],
+                    tex_coords: [m.mesh.texcoords[i * 2], 1.0 - m.mesh.texcoords[i * 2 + 1]],
+                    normal: [
+                        m.mesh.normals[i * 3],
+                        m.mesh.normals[i * 3 + 1],
+                        m.mesh.normals[i * 3 + 2],
+                    ],
+                    tangent: [0.0; 3],
+                    bitangent: [0.0; 3],
+                });
+            }
+
+            let indices = &m.mesh.indices;
+
+            for c in indices.chunks(3) {
+                let v0 = vertices[c[0] as usize];
+                let v1 = vertices[c[1] as usize];
+                let v2 = vertices[c[2] as usize];
+
+                let p0: cgmath::Point3<_> = v0.position.into();
+                let p1: cgmath::Point3<_> = v1.position.into();
+                let p2: cgmath::Point3<_> = v2.position.into();
+
+                let w0: cgmath::Point2<_> = v0.tex_coords.into();
+                let w1: cgmath::Point2<_> = v1.tex_coords.into();
+                let w2: cgmath::Point2<_> = v2.tex_coords.into();
+
+                let dp1 = p1 - p0;
+                let dp2 = p2 - p0;
+
+                let dw1 = w1 - w0;
+                let dw2 = w2 - w0;
+
+                let r = 1.0 / (dw1.x * dw2.y - dw1.y * dw2.x);
+                let tangent = (dp1 * dw2.y - dp2 * dw1.y) * r;
+                let bitangent = (dp2 * dw1.x - dp1 * dw2.x) * r;
+
+                vertices[c[0] as usize].tangent = tangent.into();
+                vertices[c[1] as usize].tangent = tangent.into();
+                vertices[c[2] as usize].tangent = tangent.into();
+
+                vertices[c[0] as usize].bitangent = bitangent.into();
+                vertices[c[1] as usize].bitangent = bitangent.into();
+                vertices[c[2] as usize].bitangent = bitangent.into();
+            }
+
+            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{:?} Vertex Buffer", path.as_ref())),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("{:?} Index Buffer", path.as_ref())),
+                contents: bytemuck::cast_slice(&m.mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+
+            meshes.push(Mesh {
+                name: m.name,
+                vertex_buffer,
+                index_buffer,
+                num_elements: m.mesh.indices.len() as u32,
+                material: scene
+                    .materials
+                    .read()
+                    .unwrap()
+                    .get(&material_keys[m.mesh.material_id.unwrap()])
+                    .unwrap()
+                    .clone(),
+            });
+        }
+
+        Ok(Self { meshes })
+    }
+
+    //pub fn update(&mut self, queue: &wgpu::Queue, camera: &Camera) {
+    //    self.renderer.update(queue, camera);
+    //}
 }

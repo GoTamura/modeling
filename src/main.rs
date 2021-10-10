@@ -24,6 +24,8 @@ async fn run(
 ) {
     let mut state = state::State::new(&window, swapchain_format, &event_loop).await;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    {
     let start_time = Instant::now();
     let mut previous_frame_time = None;
     let mut last_update_inst = Instant::now();
@@ -38,12 +40,24 @@ async fn run(
             &mut previous_frame_time,
         );
     });
+    }
+    #[cfg(target_arch = "wasm32")]
+    event_loop.run(move |event, _, control_flow| {
+        state.gui.handle_event(&event);
+        state.handle_event(
+            &event,
+            control_flow,
+            &window,
+        );
+    });
 }
 
 fn main() {
+    #[cfg(not(target_arch = "wasm32"))]
     let opt = Opt::from_args();
+    #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
-    let event_loop = EventLoop::with_user_event();
+    let event_loop: EventLoop<gui::Event> = EventLoop::with_user_event();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -59,10 +73,14 @@ fn main() {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-        //use log::Level;
-        //console_log::init_with_level(Level::Trace).expect("could not initialize logger");
         use winit::platform::web::WindowExtWebSys;
+        let query_string = web_sys::window().unwrap().location().search().unwrap();
+        let level: log::Level = parse_url_query_string(&query_string, "RUST_LOG")
+            .map(|x| x.parse().ok())
+            .flatten()
+            .unwrap_or(log::Level::Error);
+        console_log::init_with_level(level).expect("could not initialize logger");
+        std::panic::set_hook(Box::new(console_error_panic_hook::hook));
         // On wasm, append the canvas to the document body
         web_sys::window()
             .and_then(|win| win.document())
@@ -72,6 +90,28 @@ fn main() {
                     .ok()
             })
             .expect("couldn't append canvas to document body");
-        wasm_bindgen_futures::spawn_local(run(event_loop, window, wgpu::TextureFormat::Bgra8Unorm));
+        use wasm_bindgen::{prelude::*, JsCast};
+        wasm_bindgen_futures::spawn_local(async move {
+            run(event_loop, window, wgpu::TextureFormat::Bgra8UnormSrgb).await;
+          });
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+/// Parse the query string as returned by `web_sys::window()?.location().search()?` and get a
+/// specific key out of it.
+pub fn parse_url_query_string<'a>(query: &'a str, search_key: &str) -> Option<&'a str> {
+    let query_string = query.strip_prefix('?')?;
+
+    for pair in query_string.split('&') {
+        let mut pair = pair.split('=');
+        let key = pair.next()?;
+        let value = pair.next()?;
+
+        if key == search_key {
+            return Some(value);
+        }
+    }
+
+    None
 }

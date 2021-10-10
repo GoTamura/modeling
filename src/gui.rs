@@ -5,8 +5,12 @@ use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::*;
 use std::{
     sync::{Arc, RwLock},
-    time::{Duration, Instant},
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use std:: time::{Duration, Instant };
+
+use anyhow::*;
 pub enum Event {
     RequestRedraw,
 }
@@ -18,8 +22,9 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use crate::scene::Scene;
+use crate::{collection::{self, Collection}, scene::Scene};
 
+#[cfg(not(target_arch = "wasm32"))]
 fn seconds_since_midnight() -> f64 {
     let time = chrono::Local::now().time();
     time.num_seconds_from_midnight() as f64 + 1e-9 * (time.nanosecond() as f64)
@@ -27,10 +32,14 @@ fn seconds_since_midnight() -> f64 {
 
 /// This is the repaint signal type that egui needs for requesting a repaint from another thread.
 /// It sends the custom RequestRedraw event to the winit event loop.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<Event>>);
+#[cfg(target_arch = "wasm32")]
+pub struct ExampleRepaintSignal();
 
 impl epi::RepaintSignal for ExampleRepaintSignal {
     fn request_repaint(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
         self.0.lock().unwrap().send_event(Event::RequestRedraw).ok();
     }
 }
@@ -50,10 +59,14 @@ impl Gui {
         event_loop: &EventLoop<Event>,
         size: PhysicalSize<u32>,
         scene: Arc<RwLock<Scene>>,
+        collection: Arc<RwLock<Collection>>,
     ) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
         let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
             event_loop.create_proxy(),
         )));
+        #[cfg(target_arch = "wasm32")]
+        let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal());
 
         // We use the egui_winit_platform crate as the platform.
         let platform = Platform::new(PlatformDescriptor {
@@ -70,7 +83,7 @@ impl Gui {
 
         // Display the demo application that ships with egui.
         // let demo_app = egui_demo_lib::WrapApp::default();
-        let demo_app = MyApp::new(scene);
+        let demo_app = MyApp::new(scene, collection);
 
         Gui {
             platform,
@@ -86,16 +99,19 @@ impl Gui {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         frame_view: &wgpu::TextureView,
+    #[cfg(not(target_arch = "wasm32"))]
         start_time: Instant,
+    #[cfg(not(target_arch = "wasm32"))]
         previous_frame_time: &mut Option<f32>,
         window: &Window,
         width: u32,
         height: u32,
-    ) {
-        self.platform
-            .update_time(start_time.elapsed().as_secs_f64());
+    ) -> Result<()> {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.platform .update_time(start_time.elapsed().as_secs_f64());
 
         // Begin to draw the UI frame.
+        #[cfg(not(target_arch = "wasm32"))]
         let eself_start = Instant::now();
         self.platform.begin_frame();
         let mut app_output = epi::backend::AppOutput::default();
@@ -103,8 +119,14 @@ impl Gui {
         let mut iframe = epi::backend::FrameBuilder {
             info: epi::IntegrationInfo {
                 web_info: None,
+                #[cfg(not(target_arch = "wasm32"))]
                 cpu_usage: *previous_frame_time,
+                #[cfg(target_arch = "wasm32")]
+                cpu_usage: None,
+                #[cfg(not(target_arch = "wasm32"))]
                 seconds_since_midnight: Some(seconds_since_midnight()),
+                #[cfg(target_arch = "wasm32")]
+                seconds_since_midnight: None,
                 native_pixels_per_point: Some(window.scale_factor() as _),
                 prefer_dark_mode: None,
             },
@@ -119,11 +141,14 @@ impl Gui {
         self.app.update(&self.platform.context(), &mut iframe);
 
         // End the UI frame. We could now handle the output and draw the UI with the backend.
-        let (_output, paint_commands) = self.platform.end_frame();
+        let (_output, paint_commands) = self.platform.end_frame(Some(window));
         let paint_jobs = self.platform.context().tessellate(paint_commands);
 
+        #[cfg(not(target_arch = "wasm32"))]
+        {
         let frame_time = (Instant::now() - eself_start).as_secs_f64() as f32;
         *previous_frame_time = Some(frame_time);
+        }
 
         // Upload all resources for the GPU.
         let screen_descriptor = ScreenDescriptor {
@@ -139,7 +164,8 @@ impl Gui {
 
         // Record all render passes.
         self.render_pass
-            .execute(encoder, &frame_view, &paint_jobs, &screen_descriptor, None);
+            .execute(encoder, &frame_view, &paint_jobs, &screen_descriptor, None)?;
+        Ok(())
     }
 
     pub fn handle_event<T>(&mut self, event: &winit::event::Event<T>) {
@@ -149,12 +175,13 @@ impl Gui {
 
 struct MyApp {
     scene: Arc<RwLock<Scene>>,
+    collection: Arc<RwLock<Collection>>,
     counter: u32,
 }
 
 impl MyApp {
-    fn new(scene: Arc<RwLock<Scene>>) -> Self {
-        Self { scene, counter: 0 }
+    fn new(scene: Arc<RwLock<Scene>>, collection: Arc<RwLock<Collection>>) -> Self {
+        Self { scene, counter: 0, collection }
     }
 }
 
@@ -169,6 +196,9 @@ impl epi::App for MyApp {
                         for shader in self.scene.write().unwrap().shaders.read().unwrap().iter() {
                             //TODO shader.1.recompile()
                         }
+                    }
+                    for (s, model) in self.collection.read().unwrap().models.read().unwrap().iter() {
+                        ui.label(s);
                     }
                     if ui.button("-").clicked() {
                         self.counter -= 1;
