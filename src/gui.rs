@@ -3,12 +3,10 @@ use egui::FontDefinitions;
 use egui_wgpu_backend::{RenderPass, ScreenDescriptor};
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use epi::*;
-use std::{
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 
-#[cfg(not(target_arch = "wasm32"))]
-use std:: time::{Duration, Instant };
+use std::time::{Duration};
+use instant::Instant;
 
 use anyhow::*;
 pub enum Event {
@@ -22,13 +20,10 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use crate::{collection::{self, Collection}, scene::Scene};
-
-#[cfg(not(target_arch = "wasm32"))]
-fn seconds_since_midnight() -> f64 {
-    let time = chrono::Local::now().time();
-    time.num_seconds_from_midnight() as f64 + 1e-9 * (time.nanosecond() as f64)
-}
+use crate::{
+    collection::{self, Collection},
+    scene::Scene,
+};
 
 /// This is the repaint signal type that egui needs for requesting a repaint from another thread.
 /// It sends the custom RequestRedraw event to the winit event loop.
@@ -99,19 +94,16 @@ impl Gui {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         frame_view: &wgpu::TextureView,
-    #[cfg(not(target_arch = "wasm32"))]
         start_time: Instant,
-    #[cfg(not(target_arch = "wasm32"))]
         previous_frame_time: &mut Option<f32>,
         window: &Window,
         width: u32,
         height: u32,
     ) -> Result<()> {
-        #[cfg(not(target_arch = "wasm32"))]
-        self.platform .update_time(start_time.elapsed().as_secs_f64());
+        self.platform
+            .update_time(start_time.elapsed().as_secs_f64());
 
         // Begin to draw the UI frame.
-        #[cfg(not(target_arch = "wasm32"))]
         let eself_start = Instant::now();
         self.platform.begin_frame();
         let mut app_output = epi::backend::AppOutput::default();
@@ -119,16 +111,10 @@ impl Gui {
         let mut iframe = epi::backend::FrameBuilder {
             info: epi::IntegrationInfo {
                 web_info: None,
-                #[cfg(not(target_arch = "wasm32"))]
                 cpu_usage: *previous_frame_time,
-                #[cfg(target_arch = "wasm32")]
-                cpu_usage: None,
-                #[cfg(not(target_arch = "wasm32"))]
-                seconds_since_midnight: Some(seconds_since_midnight()),
-                #[cfg(target_arch = "wasm32")]
-                seconds_since_midnight: None,
                 native_pixels_per_point: Some(window.scale_factor() as _),
                 prefer_dark_mode: None,
+                name: "modeling",
             },
             tex_allocator: &mut self.render_pass,
             output: &mut app_output,
@@ -144,11 +130,8 @@ impl Gui {
         let (_output, paint_commands) = self.platform.end_frame(Some(window));
         let paint_jobs = self.platform.context().tessellate(paint_commands);
 
-        #[cfg(not(target_arch = "wasm32"))]
-        {
         let frame_time = (Instant::now() - eself_start).as_secs_f64() as f32;
         *previous_frame_time = Some(frame_time);
-        }
 
         // Upload all resources for the GPU.
         let screen_descriptor = ScreenDescriptor {
@@ -181,7 +164,11 @@ struct MyApp {
 
 impl MyApp {
     fn new(scene: Arc<RwLock<Scene>>, collection: Arc<RwLock<Collection>>) -> Self {
-        Self { scene, counter: 0, collection }
+        Self {
+            scene,
+            counter: 0,
+            collection,
+        }
     }
 }
 
@@ -197,7 +184,15 @@ impl epi::App for MyApp {
                             //TODO shader.1.recompile()
                         }
                     }
-                    for (s, model) in self.collection.read().unwrap().models.read().unwrap().iter() {
+                    for (s, model) in self
+                        .collection
+                        .read()
+                        .unwrap()
+                        .models
+                        .read()
+                        .unwrap()
+                        .iter()
+                    {
                         ui.label(s);
                     }
                     if ui.button("-").clicked() {
@@ -211,16 +206,25 @@ impl epi::App for MyApp {
                     let row_height = ui.fonts()[text_style].row_height();
                     // let row_height = ui.spacing().interact_size.y; // if you are adding buttons instead of labels.
                     let num_rows = self.scene.read().unwrap().materials.read().unwrap().len();
-                    egui::ScrollArea::auto_sized().show_rows(
+                    egui::ScrollArea::vertical().show_rows(
                         ui,
                         row_height,
                         num_rows,
                         |ui, row_range| {
                             // for row in row_range {
-                                // let text = format!("Row {}/{}", row + 1, num_rows);
-                                // ui.label(text);
+                            // let text = format!("Row {}/{}", row + 1, num_rows);
+                            // ui.label(text);
                             // }
-                            for (i, material) in self.scene.read().unwrap().materials.read().unwrap().iter().enumerate() {
+                            for (i, material) in self
+                                .scene
+                                .read()
+                                .unwrap()
+                                .materials
+                                .read()
+                                .unwrap()
+                                .iter()
+                                .enumerate()
+                            {
                                 if row_range.contains(&i) {
                                     ui.label(material.0);
                                 }

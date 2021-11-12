@@ -4,7 +4,7 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use std::time::Instant;
+use instant::Instant;
 
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -24,8 +24,6 @@ async fn run(
 ) {
     let mut state = state::State::new(&window, swapchain_format, &event_loop).await;
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
     let start_time = Instant::now();
     let mut previous_frame_time = None;
     let mut last_update_inst = Instant::now();
@@ -38,16 +36,6 @@ async fn run(
             start_time,
             &mut last_update_inst,
             &mut previous_frame_time,
-        );
-    });
-    }
-    #[cfg(target_arch = "wasm32")]
-    event_loop.run(move |event, _, control_flow| {
-        state.gui.handle_event(&event);
-        state.handle_event(
-            &event,
-            control_flow,
-            &window,
         );
     });
 }
@@ -93,7 +81,7 @@ fn main() {
         use wasm_bindgen::{prelude::*, JsCast};
         wasm_bindgen_futures::spawn_local(async move {
             run(event_loop, window, wgpu::TextureFormat::Bgra8UnormSrgb).await;
-          });
+        });
     }
 }
 

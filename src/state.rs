@@ -10,8 +10,9 @@ use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 use std::{
     sync::{Arc, RwLock},
-    time::{Duration, Instant},
+    time::{Duration},
 };
+use instant::Instant;
 
 use cgmath::prelude::*;
 
@@ -41,26 +42,15 @@ impl State {
         event: &winit::event::Event<T>,
         control_flow: &mut ControlFlow,
         window: &Window,
-
-        #[cfg(not(target_arch = "wasm32"))]
         start_time: Instant,
-        #[cfg(not(target_arch = "wasm32"))]
         last_update_inst: &mut Instant,
-        #[cfg(not(target_arch = "wasm32"))]
         previous_frame_time: &mut Option<f32>,
     ) {
         match event {
             RedrawRequested(_) => {
-                self.render(
-                #[cfg(not(target_arch = "wasm32"))]
-                    start_time,
-                #[cfg(not(target_arch = "wasm32"))]
-                     previous_frame_time,
-              &window);
+                self.render(start_time, previous_frame_time, &window);
             }
             RedrawEventsCleared => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
                 let target_frametime = Duration::from_secs_f64(1.0 / 60.0);
                 let time_since_last_frame = last_update_inst.elapsed();
                 if time_since_last_frame >= target_frametime {
@@ -71,10 +61,6 @@ impl State {
                         Instant::now() + target_frametime - time_since_last_frame,
                     );
                 }
-                }
-
-                #[cfg(target_arch = "wasm32")]
-                window.request_redraw();
             }
             MainEventsCleared => {
                 self.update();
@@ -131,8 +117,7 @@ impl State {
                 .await
                 .expect("No suitable GPU adapters found on the system!");
         #[cfg(not(target_arch = "wasm32"))]
-        let (device, queue) = 
-        adapter
+        let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
@@ -144,15 +129,18 @@ impl State {
             .await
             .expect("Unable to find a suitable GPU adapter!");
         #[cfg(target_arch = "wasm32")]
-        let (device, queue) = 
-        adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                features: wgpu::Features::default(),
-                limits: wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits()),
-                label: None,
-            },
-            None,
-        ).await.expect("Unable to find a suitable GPU adapter!");
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    features: wgpu::Features::default(),
+                    limits: wgpu::Limits::downlevel_webgl2_defaults()
+                        .using_resolution(adapter.limits()),
+                    label: None,
+                },
+                None,
+            )
+            .await
+            .expect("Unable to find a suitable GPU adapter!");
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             //format: texture_format,
@@ -168,12 +156,12 @@ impl State {
         let mut scene = Arc::new(RwLock::new(scene::Scene::new(&device, &config)));
         let mut collection = Arc::new(RwLock::new(collection::Collection::new()));
         collection.write().unwrap().add_model(
-           Arc::new(collection::Model::RUNGHOLT(
-               collection::Rungholt::load(res_dir.join("rungholt/rungholt.obj"))
-                   .await
-                   .unwrap(),
-           )),
-           "rungholt",
+            Arc::new(collection::Model::RUNGHOLT(
+                collection::Rungholt::load(res_dir.join("rungholt/rungholt.obj"))
+                    .await
+                    .unwrap(),
+            )),
+            "rungholt",
         );
         let gui = gui::Gui::new(
             &device,
@@ -249,9 +237,7 @@ impl State {
 
     fn render(
         &mut self,
-    #[cfg(not(target_arch = "wasm32"))]
         start_time: Instant,
-    #[cfg(not(target_arch = "wasm32"))]
         previous_frame_time: &mut Option<f32>,
         window: &Window,
     ) {
@@ -259,8 +245,9 @@ impl State {
             Ok(frame) => frame,
             Err(_) => {
                 self.surface.configure(&self.device, &self.config);
-                self.surface.get_current_texture() .expect("Failed to acquire next surface texture!")
-
+                self.surface
+                    .get_current_texture()
+                    .expect("Failed to acquire next surface texture!")
             }
         };
         let view = frame
@@ -279,9 +266,7 @@ impl State {
             &self.queue,
             &mut encoder,
             &view,
-    #[cfg(not(target_arch = "wasm32"))]
             start_time,
-    #[cfg(not(target_arch = "wasm32"))]
             previous_frame_time,
             window,
             self.config.width,
